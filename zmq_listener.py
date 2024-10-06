@@ -56,8 +56,8 @@ def main():
         except:
             data = None
         if data is not None:
-            dc=json.loads(data.decode('utf-8'))[pkttype]
-            if "Pkt" in dc and "aa" in dc["Pkt"] and dc["Pkt"]["aa"]==0x8e89bed6:
+            dc=json.loads(data.decode('utf-8'))
+            if "aa" in dc[pkttype] and dc[pkttype]["aa"]==0x8e89bed6:
                 if "AdvData" in dc:
                     advdata=bytearray(bytes.fromhex(dc["AdvData"]))
                     if advdata[1] == 0x16 and int.from_bytes(advdata[2:4], 'little') == 0xFFFA and advdata[4] == 0x0D:
