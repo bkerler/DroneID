@@ -1,0 +1,4 @@
+[submodule "sniffle"]
+	path = sniffle
+	url = https://github.com/bkerler/sniffle
+	branch = zmq
