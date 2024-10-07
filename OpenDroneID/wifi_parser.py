@@ -1,6 +1,5 @@
 import math
 
-from OpenDroneID.decoder import decode
 from OpenDroneID.utils import structhelper_io
 import json
 
@@ -23,8 +22,7 @@ class Astm_F3411_22a_adv_data:
     msg_count = None
 
     def __init__(self, data):
-        bt = structhelper_io(data)
-        self.msg = decode(bt)
+        self.msg = {"AdvData":data.hex()}
 
     def __repr__(self):
         return self.msg
@@ -33,7 +31,7 @@ class Astm_F3411_22a_nan_service_info:
     def __init__(self, data):
         bt = structhelper_io(data)
         self.msg_counter = bt.byte()
-        self.msg = decode(bt)
+        self.msg = {"AdvData":bt.read().hex()}
 
     def __repr__(self):
         return self.msg
@@ -92,7 +90,7 @@ class Astm_F3411_22a:
             self.msg_counter = bt.byte()
             self.adv_data = Astm_F3411_22a_adv_data(bt.read())
             if self.adv_data is not None:
-                self.msg={"OUI":self.oui.hex(),"VendorType":self.vend_type,"MsgCounter":self.msg_counter,"DRI":self.adv_data.msg}
+                self.msg={"OUI":self.oui.hex(),"VendorType":self.vend_type,"MsgCounter":self.msg_counter,"Beacon":self.adv_data.msg}
             else:
                 self.msg = {}
 

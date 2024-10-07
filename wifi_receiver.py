@@ -16,14 +16,17 @@ import zmq
 
 context = zmq.Context()
 socket = context.socket(zmq.XPUB)
-
+socket.setsockopt(zmq.XPUB_VERBOSE, True)
 
 def pcapng_parser(filename: str):
-    for packet in PcapReader(filename):
-        try:
-            filter_frames(packet)
-        except Exception as err:
-            pass
+    while True:
+        for packet in PcapReader(filename):
+            try:
+                filter_frames(packet)
+            except Exception as err:
+                pass
+            except KeyboardInterrupt:
+                break
 
 
 def filter_frames(packet: Packet) -> None:
@@ -38,14 +41,15 @@ def filter_frames(packet: Packet) -> None:
         if packet.haslayer(Dot11EltVendorSpecific):  # check vendor specific ID -> 221
             vendor_spec: Dot11EltVendorSpecific = packet.getlayer(Dot11EltVendorSpecific)
             mac = packet.payload.addr2
-            macdb[mac] = []
+            macdb["DroneID"] = {}
+            macdb["DroneID"][mac] = []
             while vendor_spec:
                 parser = oui_to_parser(vendor_spec.oui, vendor_spec.info)
                 if parser is not None:
                     if "DRI" in parser.msg:
-                        macdb[mac] = parser.msg["DRI"]
+                        macdb["DroneID"][mac] = parser.msg["DRI"]
                     elif "Beacon" in parser.msg:
-                        macdb[mac] = parser.msg["Beacon"]
+                        macdb["DroneID"][mac] = parser.msg["Beacon"]
                     if socket:
                         socket.send_string(json.dumps(macdb))
                         print(json.dumps(macdb))
@@ -56,8 +60,7 @@ def main():
     print(info)
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable zmq")
-    aparse.add_argument("--zmqport", default="4225", help="Define zmq port")
-    aparse.add_argument("--zmqhost", default="127.0.0.1", help="Define zmq host")
+    aparse.add_argument("--zmqsetting", default="127.0.0.1:4223", help="Define zmq server settings")
     aparse.add_argument("--interface", help="Define zmq host")
     aparse.add_argument("--pcap", help="Use pcap file")
     args = aparse.parse_args()
@@ -87,7 +90,7 @@ def main():
 
     zthread = None
     if args.zmq:
-        url = f"tcp://{args.zmqhost}:{args.zmqport}"
+        url = f"tcp://{args.zmqsetting}"
         socket.setsockopt(zmq.XPUB_VERBOSE, True)
         socket.bind(url)
 
@@ -112,7 +115,6 @@ def main():
         zthread.start()
 
     if interface is not None:
-        #success = switch_dev_mode(interface, "monitor")
         sniffer = AsyncSniffer(
             iface=interface,
             lfilter=lambda s: s.getlayer(Dot11).subtype==0x8,
@@ -130,7 +132,6 @@ def main():
         sniffer.stop()
         if args.zmq:
             zthread.join()
-        #success = switch_dev_mode(interface, "managed")
     else:
         pcapng_parser(args.pcap)
 
