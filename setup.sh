@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 python -m venv .venv
 source .venv/bin/activate
 sudo setcap 'CAP_NET_RAW=eip CAP_NET_ADMIN=eip' $(readlink -f .venv/bin/python3)
