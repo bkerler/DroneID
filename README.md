@@ -11,16 +11,13 @@
 1. Get sniffle from [here](https://github.com/bkerler/sniffle) and install
 2. Run 
 ```bash
-./sniff_receiver.py -b 2000000 -z --zmqsetting 127.0.0.1:4222 -l -e -s /dev/ttyUSB1
+./bluetooth_receiver.sh -b 2000000 -s /dev/ttyUSB1 --zmqsetting 127.0.0.1:4222
 ```
 ```
 Argument description:
 ---------------------
 -b is Baudrate (only use 2000000 for newer Sonoff devices, otherwise leave away)
 -s is the serial port of the bluetooth dongle
--e we want extended advertising packets
--l we want longrange packets
--z spawn a zmq server
 --zmqsetting zmq server addr is 127.0.0.1 with Port 4222
 ```
 
@@ -42,7 +39,7 @@ Argument description:
 ```
 Argument description:
 ---------------------
--z spawn a zmq server
---zmqsetting zmq server addr is 127.0.0.1 with Port 4224
---zmqclients listen to bluetooth receiver at 127.0.0.1:4222 and wifi receiver at 127.0.0.1:4223
+-z spawn a zmq server (optional)
+--zmqsetting zmq server addr is 127.0.0.1 with Port 4224 (optional)
+--zmqclients listen to bluetooth receiver at 127.0.0.1:4222 and wifi receiver at 127.0.0.1:4223  (optional)
 ```

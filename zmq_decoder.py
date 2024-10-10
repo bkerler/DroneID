@@ -41,9 +41,9 @@ def decoder_thread(socket, pub):
                 data = None
             if data is not None:
                 dc = json.loads(data.decode('utf-8'))
-                if "AUX_ADV_IND" in dc and "Pkt" in dc["AUX_ADV_IND"] and "aa" in dc["AUX_ADV_IND"]["Pkt"] and dc["AUX_ADV_IND"]["Pkt"]["aa"] == 0x8e89bed6:
-                    if "AdvData" in dc["AUX_ADV_IND"]:
-                        advdata = bytearray(bytes.fromhex(dc["AUX_ADV_IND"]["AdvData"]))
+                if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
+                    if "AdvData" in dc:
+                        advdata = bytearray(bytes.fromhex(dc["AdvData"]))
                         if advdata[1] == 0x16 and int.from_bytes(advdata[2:4], 'little') == 0xFFFA and advdata[
                             4] == 0x0D:
                             # Open Drone ID
