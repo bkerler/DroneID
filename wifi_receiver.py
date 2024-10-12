@@ -13,10 +13,9 @@ from scapy.all import *
 from scapy.layers.dot11 import Dot11EltVendorSpecific, Dot11, Dot11Elt
 import zmq
 
-
+debug = False
 context = zmq.Context()
-socket = context.socket(zmq.XPUB)
-socket.setsockopt(zmq.XPUB_VERBOSE, True)
+socket = None
 
 def pcapng_parser(filename: str):
     while True:
@@ -31,6 +30,7 @@ def pcapng_parser(filename: str):
 
 def filter_frames(packet: Packet) -> None:
     global socket
+    global debug
     macdb = {}
     pt = packet.getlayer(Dot11)
     # subtype 0 = Management, 0x8 = Beacon, 0x13 = Action
@@ -52,10 +52,13 @@ def filter_frames(packet: Packet) -> None:
                         macdb["DroneID"][mac] = parser.msg["Beacon"]
                     if socket:
                         socket.send_string(json.dumps(macdb))
+                    if not socket or debug:
                         print(json.dumps(macdb))
                 break
 
 def main():
+    global debug
+    global socket
     info = "Host-side receiver for OpenDrone ID wifi (c) B.Kerler 2024"
     print(info)
     aparse = argparse.ArgumentParser(description=info)
@@ -63,6 +66,7 @@ def main():
     aparse.add_argument("--zmqsetting", default="127.0.0.1:4223", help="Define zmq server settings")
     aparse.add_argument("--interface", help="Define zmq host")
     aparse.add_argument("--pcap", help="Use pcap file")
+    aparse.add_argument("--debug", help="Print messages")
     args = aparse.parse_args()
     current_python_executable = cexec(["readlink", "-f", f"{sys.executable}"]).replace("\n", "")
     res = cexec(["getcap", f"{current_python_executable}"])
@@ -72,6 +76,8 @@ def main():
         exit(1)
 
     interfaces = search_interfaces()
+    if args.debug:
+        debug = True
     if args.interface is None and args.pcap is None:
         interface = get_iw_interfaces(interfaces)
     elif args.interface is not None:
@@ -90,6 +96,8 @@ def main():
 
     zthread = None
     if args.zmq:
+        socket = context.socket(zmq.XPUB)
+        socket.setsockopt(zmq.XPUB_VERBOSE, True)
         url = f"tcp://{args.zmqsetting}"
         socket.setsockopt(zmq.XPUB_VERBOSE, True)
         socket.bind(url)
