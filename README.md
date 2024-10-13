@@ -34,7 +34,7 @@ Argument description:
 
 ### 3. Decode and spawn zmq server
 ```bash
-./zmq_decoder.py -z --zmqsetting 127.0.0.1:4224 --zmqclients 127.0.0.1:4222,127.0.0.1:4223
+./zmq_decoder.py -z --zmqsetting 127.0.0.1:4224 --zmqclients 127.0.0.1:4222,127.0.0.1:4223 -d
 ```
 ```
 Argument description:
@@ -42,4 +42,5 @@ Argument description:
 -z spawn a zmq server (optional)
 --zmqsetting zmq server addr is 127.0.0.1 with Port 4224 (optional)
 --zmqclients listen to bluetooth receiver at 127.0.0.1:4222 and wifi receiver at 127.0.0.1:4223  (optional)
+-d print decoded messages (optional)
 ```

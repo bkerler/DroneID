@@ -33,6 +33,7 @@ def zmq_thread(socket):
 
 def decoder_thread(socket, pub):
     global stop
+    global debug
     try:
         while not stop:
             try:
@@ -47,18 +48,21 @@ def decoder_thread(socket, pub):
                         if advdata[1] == 0x16 and int.from_bytes(advdata[2:4], 'little') == 0xFFFA and advdata[
                             4] == 0x0D:
                             # Open Drone ID
-                            print("Open Drone ID BT4/BT5\n-------------------------\n")
+                            if debug:
+                                print("Open Drone ID BT4/BT5\n-------------------------\n")
                             json_data = decode_ble(advdata)
                             if pub:
                                 pub.send_string(json_data)
-                            print(json_data)
-                            print()
+                            if debug:
+                                print(json_data)
+                                print()
                             sys.stdout.flush()
                 elif "DroneID" in dc:
                     for mac in dc["DroneID"]:
                         # Open Drone ID
                         field = dc["DroneID"][mac]
-                        print("Open Drone ID WIFI\n-------------------------\n")
+                        if debug:
+                            print("Open Drone ID WIFI\n-------------------------\n")
                         if "AdvData" in field:
                             try:
                                 fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
@@ -67,9 +71,11 @@ def decoder_thread(socket, pub):
                                     json_data = json.dumps(field)
                                     if pub:
                                         pub.send_string(json_data)
-                                    print(json_data)
+                                    if debug:
+                                        print(json_data)
                             except Exception as e:
-                                print(e)
+                                if debug:
+                                    print(e)
                                 pass
                         else:
                             try:
@@ -77,20 +83,25 @@ def decoder_thread(socket, pub):
                                 json_data = json.dumps(field)
                                 if pub:
                                     pub.send_string(json_data)
-                                print(json_data)
+                                if debug:
+                                    print(json_data)
                             except Exception as e:
-                                print(e)
+                                if debug:
+                                    print(e)
                                 pass
-                        print()
+                        if debug:
+                            print()
                         sys.stdout.flush()
     except zmq.error.ContextTerminated:
         pass
 
 def main():
     global stop
+    global debug
     info = "ZMQ decoder for BLE4/5 + WIFI ZMQ clients (c) B.Kerler 2024"
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable zmq")
+    aparse.add_argument("-d", "--debug", action="store_true", help="Print decoded messages")
     aparse.add_argument("--zmqsetting", default="127.0.0.1:4224", help="Define zmq server settings")
     aparse.add_argument("--zmqclients", default="127.0.0.1:4222,127.0.0.1:4223", help="Define bluetooth/wifi zmq clients")
     args = aparse.parse_args()
