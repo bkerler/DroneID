@@ -6,7 +6,7 @@ from subprocess import Popen, PIPE, STDOUT
 import argparse
 import json
 from Library.utils import search_interfaces, get_iw_interfaces, extract_wifi_if_details, enable_monitor_mode, \
-    set_interface_channel, cexec
+    set_interface_channel, cexec, enable_managed_mode
 from OpenDroneID.wifi_parser import oui_to_parser
 from scapy.all import *
 from scapy.layers.dot11 import Dot11EltVendorSpecific, Dot11, Dot11Elt
@@ -89,7 +89,9 @@ def main():
 
     if interface is not None:
         i2d = extract_wifi_if_details(interface)
-        enable_monitor_mode(i2d, interface)
+        if not enable_monitor_mode(i2d, interface):
+            sys.stdout.flush()
+            exit(1)
         print("Setting wifi channel 6")
         set_interface_channel(interface,6)
 
@@ -139,6 +141,9 @@ def main():
         sniffer.stop()
         if args.zmq:
             zthread.join()
+        if interface is not None:
+            i2d = extract_wifi_if_details(interface)
+            enable_managed_mode(i2d,interface)
     else:
         pcapng_parser(args.pcap)
 

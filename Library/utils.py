@@ -63,17 +63,32 @@ def search_interfaces():
     return interfaces
 
 def enable_monitor_mode(i2d, interface):
+    res = True
     info = cexec(["iw", i2d[interface][0], "info"])
     if "* monitor" not in info:
-        print("Interface {interface} doesn't support monitoring mode :(")
+        print(f"Interface {interface} doesn't support monitoring mode :(")
         exit(1)
     sudo(["rfkill", "unblock", "all"])
     if i2d[interface][1] != "monitor":
         print("Trying to enable monitoring mode")
         sudo(["ip", "link", "set", f"{interface}", "down"])
         sudo(["iwconfig", f"{interface}", "mode", "monitor"])
+        i2d = extract_wifi_if_details(interface)
+        if i2d[interface][1] != "monitor":
+            print("Enabling monitor mode failed :(")
+            res = False
         sudo(["ip", "link", "set", f"{interface}", "up"])
-
+    return res
+def enable_managed_mode(i2d, interface):
+    info = cexec(["iw", i2d[interface][0], "info"])
+    if "* managed" not in info:
+        print(f"Interface {interface} doesn't support monitoring mode :(")
+        exit(1)
+    if i2d[interface][1] != "managed":
+        print("Trying to enable managed mode")
+        sudo(["ip", "link", "set", f"{interface}", "down"])
+        sudo(["iwconfig", f"{interface}", "mode", "managed"])
+        sudo(["ip", "link", "set", f"{interface}", "up"])
 
 def set_interface_channel(interface, channel):
     return sudo(["iwconfig", interface, "channel", str(channel)])
