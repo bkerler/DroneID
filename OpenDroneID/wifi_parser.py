@@ -73,6 +73,7 @@ class Astm_F3411_22a_nan_desc:
 class Astm_F3411_22a:
     def __init__(self, data):
         bt = structhelper_io(data)
+        self.msg = {}
         self.oui = bt.bytes(3)
         self.vend_type = bt.byte()
         if self.vend_type == 0x13: # NAN Packet
@@ -84,15 +85,11 @@ class Astm_F3411_22a:
                 elif self.nan_service_desc.attribute_id == 0:
                     self.msg = {"OUI": self.oui.hex(), "VendorType": self.vend_type,
                                 "Beacon": self.nan_service_desc.msg}
-            else:
-                self.msg = {}
         elif self.vend_type == 0xD: # Beacon
             self.msg_counter = bt.byte()
             self.adv_data = Astm_F3411_22a_adv_data(bt.read())
             if self.adv_data is not None:
                 self.msg={"OUI":self.oui.hex(),"VendorType":self.vend_type,"MsgCounter":self.msg_counter,"Beacon":self.adv_data.msg}
-            else:
-                self.msg = {}
 
     def __repr__(self):
         return json.dumps(self.msg)
