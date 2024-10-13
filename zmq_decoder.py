@@ -95,14 +95,17 @@ def main():
     aparse.add_argument("--zmqclients", default="127.0.0.1:4222,127.0.0.1:4223", help="Define bluetooth/wifi zmq clients")
     args = aparse.parse_args()
 
-    sctx = zmq.Context()
-    pub = sctx.socket(zmq.XPUB)
-    sctx.setsockopt(zmq.XPUB_VERBOSE, True)
-    purl = f"tcp://{args.zmqsetting}"
-    pub.bind(purl)
+    if args.zmq:
+        sctx = zmq.Context()
+        pub = sctx.socket(zmq.XPUB)
+        sctx.setsockopt(zmq.XPUB_VERBOSE, True)
+        purl = f"tcp://{args.zmqsetting}"
+        pub.bind(purl)
 
-    zthread = Thread(target=zmq_thread, args=[pub], daemon=True, name='zmq')
-    zthread.start()
+        zthread = Thread(target=zmq_thread, args=[pub], daemon=True, name='zmq')
+        zthread.start()
+    else:
+        pub = None
 
     clients = args.zmqclients.split(",")
     subs = []
