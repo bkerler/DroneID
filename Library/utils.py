@@ -1,4 +1,5 @@
 import pwinput
+import os
 from scapy.all import *
 from subprocess import Popen, PIPE
 sudopw = None
@@ -10,9 +11,13 @@ def cexec(command, pipe=''):
 
 def sudo(command):
     global sudopw
-    if sudopw is None:
-        sudopw = pwinput.pwinput('Enter your sudo password: ')
-    pr = ["sudo", "-S"]
+    euid = os.geteuid()
+    if euid != 0:
+        if sudopw is None:
+            sudopw = pwinput.pwinput('Enter your sudo password: ')
+        pr = ["sudo", "-S"]
+    else:
+        pr = []
     for cmd in command:
         pr.append(cmd)
     res = cexec(pipe=sudopw, command=pr)
