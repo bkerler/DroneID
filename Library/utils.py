@@ -62,11 +62,13 @@ def enable_monitor_mode(i2d, interface):
     if "* monitor" not in info:
         print("Interface {interface} doesn't support monitoring mode :(")
         exit(1)
+    sudo(["rfkill", "unblock", "all"])
     if i2d[interface][1] != "monitor":
         print("Trying to enable monitoring mode")
         sudo(["ip", "link", "set", f"{interface}", "down"])
         sudo(["iwconfig", f"{interface}", "mode", "monitor"])
         sudo(["ip", "link", "set", f"{interface}", "up"])
+
 
 def set_interface_channel(interface, channel):
     return sudo(["iwconfig", interface, "channel", str(channel)])
