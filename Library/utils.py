@@ -1,3 +1,5 @@
+from getpass import getpass
+
 import pwinput
 import os
 from scapy.all import *
@@ -14,7 +16,10 @@ def sudo(command):
     euid = os.geteuid()
     if euid != 0:
         if sudopw is None and not 'SUDO_UID' in os.environ:
-            sudopw = pwinput.pwinput('Enter your sudo password: ')
+            try:
+                sudopw = pwinput.pwinput('Enter your sudo password: ')
+            except:
+                sudopw = getpass('Enter your sudo password: ')
         pr = ["sudo", "-S"]
     else:
         pr = []
