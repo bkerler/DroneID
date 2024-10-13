@@ -31,9 +31,8 @@ def zmq_thread(socket):
         pass
 
 
-def decoder_thread(socket, pub):
+def decoder_thread(socket, pub, debug):
     global stop
-    global debug
     try:
         while not stop:
             try:
@@ -97,7 +96,7 @@ def decoder_thread(socket, pub):
 
 def main():
     global stop
-    global debug
+    debug = False
     info = "ZMQ decoder for BLE4/5 + WIFI ZMQ clients (c) B.Kerler 2024"
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable zmq")
@@ -127,7 +126,7 @@ def main():
         sub.setsockopt(zmq.SUBSCRIBE, bytes('{"AUX_ADV_IND"', 'utf-8'))
         sub.setsockopt(zmq.SUBSCRIBE, bytes('{"DroneID"', 'utf-8'))
         if sub.connect(url):
-            zthread = Thread(target=decoder_thread, args=[sub,pub], daemon=True, name='zmq')
+            zthread = Thread(target=decoder_thread, args=[sub,pub,debug], daemon=True, name='zmq')
             zthread.start()
             subs.append(zthread)
 

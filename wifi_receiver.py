@@ -36,7 +36,7 @@ def filter_frames(packet: Packet) -> None:
     # NAN Service Discovery Frames shall be encoded in 0x13 and contain DRI Info
     # NAN Synchronization Beacon shall be encoded in 0x8 but doesn't contain DRI Info
     # Broadcast Message can only happen on channel 6 and contains DRI Info
-    if pt.subtype in [0, 0x8, 0x13]:
+    if pt is not None and pt.subtype in [0, 0x8, 0x13]:
         if packet.haslayer(Dot11EltVendorSpecific):  # check vendor specific ID -> 221
             vendor_spec: Dot11EltVendorSpecific = packet.getlayer(Dot11EltVendorSpecific)
             mac = packet.payload.addr2
