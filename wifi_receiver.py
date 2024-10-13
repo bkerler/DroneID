@@ -5,7 +5,6 @@ import sys
 from subprocess import Popen, PIPE, STDOUT
 import argparse
 import json
-
 from Library.utils import search_interfaces, get_iw_interfaces, extract_wifi_if_details, enable_monitor_mode, \
     set_interface_channel, cexec
 from OpenDroneID.wifi_parser import oui_to_parser

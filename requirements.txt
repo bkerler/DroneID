@@ -2,3 +2,4 @@ scapy
 pytz
 zmq
 pyserial
+pwinput
