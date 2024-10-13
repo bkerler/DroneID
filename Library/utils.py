@@ -13,7 +13,7 @@ def sudo(command):
     global sudopw
     euid = os.geteuid()
     if euid != 0:
-        if sudopw is None:
+        if sudopw is None and not 'SUDO_UID' in os.environ:
             sudopw = pwinput.pwinput('Enter your sudo password: ')
         pr = ["sudo", "-S"]
     else:
