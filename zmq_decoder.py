@@ -31,7 +31,7 @@ def zmq_thread(socket):
         pass
 
 
-def decoder_thread(socket, pub, debug):
+def decoder_thread(socket, pub, verbose):
     global stop
     try:
         while not stop:
@@ -47,12 +47,12 @@ def decoder_thread(socket, pub, debug):
                         if advdata[1] == 0x16 and int.from_bytes(advdata[2:4], 'little') == 0xFFFA and advdata[
                             4] == 0x0D:
                             # Open Drone ID
-                            if debug:
+                            if verbose:
                                 print("Open Drone ID BT4/BT5\n-------------------------\n")
                             json_data = decode_ble(advdata)
                             if pub:
                                 pub.send_string(json_data)
-                            if debug:
+                            if verbose:
                                 print(json_data)
                                 print()
                             sys.stdout.flush()
@@ -60,7 +60,7 @@ def decoder_thread(socket, pub, debug):
                     for mac in dc["DroneID"]:
                         # Open Drone ID
                         field = dc["DroneID"][mac]
-                        if debug:
+                        if verbose:
                             print("Open Drone ID WIFI\n-------------------------\n")
                         if "AdvData" in field:
                             try:
@@ -70,10 +70,10 @@ def decoder_thread(socket, pub, debug):
                                     json_data = json.dumps(field)
                                     if pub:
                                         pub.send_string(json_data)
-                                    if debug:
+                                    if verbose:
                                         print(json_data)
                             except Exception as e:
-                                if debug:
+                                if verbose:
                                     print(e)
                                 pass
                         else:
@@ -82,13 +82,13 @@ def decoder_thread(socket, pub, debug):
                                 json_data = json.dumps(field)
                                 if pub:
                                     pub.send_string(json_data)
-                                if debug:
+                                if verbose:
                                     print(json_data)
                             except Exception as e:
-                                if debug:
+                                if verbose:
                                     print(e)
                                 pass
-                        if debug:
+                        if verbose:
                             print()
                         sys.stdout.flush()
     except zmq.error.ContextTerminated:
@@ -96,11 +96,11 @@ def decoder_thread(socket, pub, debug):
 
 def main():
     global stop
-    debug = False
+    verbose = False
     info = "ZMQ decoder for BLE4/5 + WIFI ZMQ clients (c) B.Kerler 2024"
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable zmq")
-    aparse.add_argument("-d", "--debug", action="store_true", help="Print decoded messages")
+    aparse.add_argument("-v", "--verbose", action="store_true", help="Print decoded messages")
     aparse.add_argument("--zmqsetting", default="127.0.0.1:4224", help="Define zmq server settings")
     aparse.add_argument("--zmqclients", default="127.0.0.1:4222,127.0.0.1:4223", help="Define bluetooth/wifi zmq clients")
     args = aparse.parse_args()
@@ -126,7 +126,7 @@ def main():
         sub.setsockopt(zmq.SUBSCRIBE, bytes('{"AUX_ADV_IND"', 'utf-8'))
         sub.setsockopt(zmq.SUBSCRIBE, bytes('{"DroneID"', 'utf-8'))
         if sub.connect(url):
-            zthread = Thread(target=decoder_thread, args=[sub,pub,debug], daemon=True, name='zmq')
+            zthread = Thread(target=decoder_thread, args=[sub,pub,verbose], daemon=True, name='zmq')
             zthread.start()
             subs.append(zthread)
 
