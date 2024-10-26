@@ -14,3 +14,4 @@ DA_*.bin
 # Pyinstaller stuff
 build
 dist
+.venv
