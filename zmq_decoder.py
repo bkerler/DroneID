@@ -117,6 +117,21 @@ def process_decoded_data(dc, pub):
                     if verbose:
                         print("Open Drone ID BT4/BT5\n-------------------------\n")
                     json_data = decode_ble(advdata)
+                    
+                    # Add AdvA address to JSON if available
+                    if "aext" in dc and "AdvA" in dc["aext"]:
+                        try:
+                            json_obj = json.loads(json_data)
+                            if isinstance(json_obj, list) and len(json_obj) > 0:
+                                for msg in json_obj:
+                                    if "Basic ID" in msg:
+                                        # Extract MAC from AdvA format "XX:XX:XX:XX:XX:XX (Public)"
+                                        adv_a = dc["aext"]["AdvA"].split()[0]
+                                        msg["Basic ID"]["MAC"] = adv_a
+                            json_data = json.dumps(json_obj)
+                        except json.JSONDecodeError:
+                            pass
+                            
                     if pub:
                         pub.send_string(json_data)
                     if verbose:
