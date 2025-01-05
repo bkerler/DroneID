@@ -21,6 +21,7 @@ def log(*msg):
         print(f"{s}:", *msg, end="\n", file=sys.stderr)
 
 def zmq_thread(pub_socket):
+    """Handles ZMQ subscriber notifications."""
     global stop
     try:
         while not stop:
@@ -39,6 +40,7 @@ def zmq_thread(pub_socket):
         pass
 
 def decoder_thread(socket, pub):
+    """Handles Bluetooth/Wi-Fi OpenDroneID messages."""
     global stop
     poller = zmq.Poller()
     poller.register(socket, zmq.POLLIN)
@@ -63,7 +65,9 @@ def decoder_thread(socket, pub):
 
                     if verbose:
                         print("ZMQ Data Received:", json.dumps(dc, indent=2))
-                    pub.send_string(json.dumps(dc))  # Forward to subscribers
+                    
+                    # Process Bluetooth/Wi-Fi data
+                    process_decoded_data(dc, pub)
     except zmq.error.ContextTerminated:
         pass
     except Exception as e:
@@ -71,6 +75,7 @@ def decoder_thread(socket, pub):
             log("Decoder Thread Error:", e)
 
 def uart_listener(uart_device, pub):
+    """Reads ESP32 UART data and forwards it via ZMQ."""
     global stop
     buffer = ""
     with serial.Serial(uart_device, baudrate=115200, timeout=1) as ser:
@@ -100,11 +105,11 @@ def uart_listener(uart_device, pub):
                 time.sleep(0.1)
 
 def dji_listener(dji_url, pub):
-    """Subscribes to DJI Receiver and forwards data."""
+    """Subscribes to DJI Receiver and forwards data as-is."""
     global stop
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
-    socket.setsockopt(zmq.SUBSCRIBE, b'')
+    socket.setsockopt(zmq.SUBSCRIBE, b'')  # Subscribe to all messages
     try:
         socket.connect(f"tcp://{dji_url}")
         log(f"Connected to DJI Receiver at {dji_url}")
@@ -115,7 +120,8 @@ def dji_listener(dji_url, pub):
             if socket in socks and socks[socket] == zmq.POLLIN:
                 try:
                     data = socket.recv_string()
-                    pub.send_string(data)  # Forward to all ZMQ subscribers
+                    if pub:
+                        pub.send_string(data)  # Forward raw DJI data
                     if verbose:
                         log(f"DJI Data Forwarded: {data}")
                 except zmq.ZMQError as e:
@@ -126,6 +132,69 @@ def dji_listener(dji_url, pub):
     finally:
         socket.close()
         context.term()
+
+def process_decoded_data(dc, pub):
+    """Processes and forwards the decoded Bluetooth/Wi-Fi data."""
+    if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
+        if "AdvData" in dc:
+            try:
+                advdata = bytearray(bytes.fromhex(dc["AdvData"]))
+                if advdata[1] == 0x16 and int.from_bytes(advdata[2:4], 'little') == 0xFFFA and advdata[4] == 0x0D:
+                    if verbose:
+                        print("Open Drone ID BT4/BT5\n-------------------------\n")
+                    json_data = decode_ble(advdata)
+
+                    # Add AdvA address to JSON if available
+                    if "aext" in dc and "AdvA" in dc["aext"]:
+                        try:
+                            json_obj = json.loads(json_data)
+                            if isinstance(json_obj, list) and len(json_obj) > 0:
+                                for msg in json_obj:
+                                    if "Basic ID" in msg:
+                                        adv_a = dc["aext"]["AdvA"].split()[0]
+                                        msg["Basic ID"]["MAC"] = adv_a  # Append MAC to BT JSON
+                            json_data = json.dumps(json_obj)
+                        except json.JSONDecodeError:
+                            pass
+
+                    if pub:
+                        pub.send_string(json_data)
+                    if verbose:
+                        print(json_data)
+                        print()
+                    sys.stdout.flush()
+            except ValueError as e:
+                log("AdvData Decode Error:", e)
+
+    elif "DroneID" in dc:
+        for mac, field in dc["DroneID"].items():
+            if verbose:
+                print("Open Drone ID Wi-Fi\n-------------------------\n")
+            if "AdvData" in field:
+                try:
+                    fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
+                    for field_decoded in fields:
+                        field_decoded["MAC"] = mac
+                        json_data = json.dumps(field_decoded)
+                        if pub:
+                            pub.send_string(json_data)
+                        if verbose:
+                            print(json_data)
+                except Exception as e:
+                    log("Decoding Error:", e)
+            else:
+                try:
+                    field["MAC"] = mac
+                    json_data = json.dumps(field)
+                    if pub:
+                        pub.send_string(json_data)
+                    if verbose:
+                        print(json_data)
+                except Exception as e:
+                    log("JSON Dump Error:", e)
+            if verbose:
+                print()
+            sys.stdout.flush()
 
 def main():
     global stop, verbose
