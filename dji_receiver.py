@@ -2,8 +2,18 @@
 """
 dji_receiver.py
 
-Connects to AntSDR, receives DJI DroneID data, converts to ZMQ-compatible JSON format,
+Connects to AntSDR, receives DJI DroneID data, converts it to a ZMQ-compatible JSON format,
 and publishes it via an efficient ZMQ XPUB socket.
+
+Usage:
+    python3 dji_receiver.py [--debug]
+
+Options:
+    -d, --debug  Enable debug output to console.
+
+Default Behavior:
+    - Prints only warnings and errors to the console if --debug is not specified.
+    - Publishes the processed DJI DroneID data on tcp://0.0.0.0:4221 by default.
 """
 
 import socket
@@ -12,20 +22,36 @@ import json
 import logging
 import zmq
 import time
+import argparse
 
 # Hardcoded configuration
 ANTSDR_IP = "192.168.1.10"
 ANTSDR_PORT = 41030
-ZMQ_PUB_IP = "0.0.0.0"
+ZMQ_PUB_IP = "127.0.0.1"
 ZMQ_PUB_PORT = 4221  # Port to serve DJI receiver data
 
-def setup_logging(debug: bool = True):
-    """Configure logging to console."""
-    log_level = logging.DEBUG if debug else logging.INFO
+def parse_args():
+    """
+    Parses command-line arguments.
+    Returns an object with 'debug' as a boolean.
+    """
+    parser = argparse.ArgumentParser(description="DJI Receiver: Publish DJI DroneID data via ZMQ.")
+    parser.add_argument("-d", "--debug", action="store_true",
+                        help="Enable debug messages and logging output.")
+    return parser.parse_args()
+
+def setup_logging(debug: bool):
+    """
+    Configures logging to console. Debug mode shows more verbose logs,
+    otherwise only warnings and errors.
+
+    Args:
+        debug (bool): If True, set log level to DEBUG. Else, WARNING.
+    """
+    log_level = logging.DEBUG if debug else logging.WARNING
     logging.basicConfig(
         level=log_level,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        handlers=[logging.StreamHandler()]
+        format='%(asctime)s [%(levelname)s] %(message)s'
     )
 
 def iso_timestamp_now() -> str:
@@ -44,21 +70,31 @@ def parse_frame(frame: bytes):
         return None, None
 
 def parse_data_1(data: bytes) -> dict:
-    """Parses data of package type 0x01."""
+    """
+    Parses data of package type 0x01.
+
+    Returns a dictionary with the fields needed to build a ZMQ-compatible JSON structure.
+    """
     try:
         serial_number = data[:64].decode('utf-8').rstrip('\x00')
         device_type = data[64:128].decode('utf-8').rstrip('\x00')
-        app_lat = struct.unpack('<d', data[129:137])[0]  # Pilot app latitude (home point)
-        app_lon = struct.unpack('<d', data[137:145])[0]  # Pilot app longitude (home point)
-        drone_lat = struct.unpack('<d', data[145:153])[0]  # Drone latitude
-        drone_lon = struct.unpack('<d', data[153:161])[0]  # Drone longitude
-        height_agl = struct.unpack('<d', data[161:169])[0]  # Height above ground level
-        geodetic_altitude = struct.unpack('<d', data[169:177])[0]  # Altitude (MSL)
-        speed_e = struct.unpack('<d', data[201:209])[0]  # Speed east (m/s)
-        speed_n = struct.unpack('<d', data[209:217])[0]  # Speed north (m/s)
-        speed_u = struct.unpack('<d', data[217:225])[0]  # Vertical speed (up, m/s)
+        # Pilot home lat/lon
+        app_lat = struct.unpack('<d', data[129:137])[0]
+        app_lon = struct.unpack('<d', data[137:145])[0]
+        # Drone lat/lon
+        drone_lat = struct.unpack('<d', data[145:153])[0]
+        drone_lon = struct.unpack('<d', data[153:161])[0]
+        # Height and altitude
+        height_agl = struct.unpack('<d', data[161:169])[0]
+        geodetic_altitude = struct.unpack('<d', data[169:177])[0]
+        # Speeds
+        speed_e = struct.unpack('<d', data[201:209])[0]  # East
+        speed_n = struct.unpack('<d', data[209:217])[0]  # North
+        speed_u = struct.unpack('<d', data[217:225])[0]  # Vertical
+        # RSSI
         rssi = struct.unpack('<h', data[225:227])[0]
 
+        # Compute horizontal speed from east/north components
         horizontal_speed = (speed_e**2 + speed_n**2)**0.5
 
         return {
@@ -78,8 +114,15 @@ def parse_data_1(data: bytes) -> dict:
         logging.error(f"Error parsing data: {e}")
         return {}
 
+def is_valid_latlon(lat: float, lon: float) -> bool:
+    """Check if latitude and longitude are within valid ranges and not zero."""
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and lat != 0.0 and lon != 0.0
+
 def format_as_zmq_json(parsed_data: dict) -> list:
-    """Formats the parsed AntSDR data into a ZMQ-compatible JSON structure."""
+    """
+    Formats the parsed data into a ZMQ-compatible list of messages,
+    e.g. [ {"Basic ID": {...}}, {"Location/Vector Message": {...}}, ... ].
+    """
     if not parsed_data:
         return []
 
@@ -128,12 +171,15 @@ def format_as_zmq_json(parsed_data: dict) -> list:
 
     return message_list
 
-def is_valid_latlon(lat: float, lon: float) -> bool:
-    """Check if latitude and longitude are within valid ranges."""
-    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and lat != 0.0 and lon != 0.0
-
 def send_zmq_message(zmq_pub_socket: zmq.Socket, message_list: list):
-    """Send the ZMQ JSON-formatted message."""
+    """
+    Sends the ZMQ JSON-formatted message.
+    Logs debug info if in debug mode.
+
+    Args:
+        zmq_pub_socket (zmq.Socket): The XPUB socket to publish to.
+        message_list (list): The list of message dictionaries to convert to JSON.
+    """
     try:
         json_message = json.dumps(message_list)
         zmq_pub_socket.send_string(json_message)
@@ -142,9 +188,12 @@ def send_zmq_message(zmq_pub_socket: zmq.Socket, message_list: list):
         logging.error(f"Failed to send JSON via ZMQ: {e}")
 
 def tcp_client():
-    """Connects to AntSDR and publishes messages via ZMQ XPUB."""
+    """
+    Connects to AntSDR via TCP, receives raw frames, parses them,
+    and publishes the result as a ZMQ XPUB stream on the configured IP/Port.
+    """
     context = zmq.Context()
-    zmq_pub_socket = context.socket(zmq.XPUB)  # XPUB to support efficient subscriptions
+    zmq_pub_socket = context.socket(zmq.XPUB)  # XPUB for efficient subscriptions
     zmq_pub_socket.bind(f"tcp://{ZMQ_PUB_IP}:{ZMQ_PUB_PORT}")
     logging.info(f"ZMQ XPUB socket bound to tcp://{ZMQ_PUB_IP}:{ZMQ_PUB_PORT}")
 
@@ -177,7 +226,8 @@ def tcp_client():
             continue
 
 def main():
-    setup_logging()
+    args = parse_args()
+    setup_logging(args.debug)
     tcp_client()
 
 if __name__ == "__main__":
