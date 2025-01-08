@@ -108,7 +108,6 @@ def uart_listener(uart_device, pub):
 
 
 def process_decoded_data(dc, pub):
-    """Processes and forwards the decoded data via ZMQ."""
     if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
         if "AdvData" in dc:
             try:
@@ -128,6 +127,8 @@ def process_decoded_data(dc, pub):
                                         # Extract MAC from AdvA format "XX:XX:XX:XX:XX:XX (Public)"
                                         adv_a = dc["aext"]["AdvA"].split()[0]
                                         msg["Basic ID"]["MAC"] = adv_a
+                                        # Add RSSI from AUX_ADV_IND
+                                        msg["Basic ID"]["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
                             json_data = json.dumps(json_obj)
                         except json.JSONDecodeError:
                             pass
@@ -146,11 +147,20 @@ def process_decoded_data(dc, pub):
         for mac, field in dc["DroneID"].items():
             if verbose:
                 print("Open Drone ID WIFI\n-------------------------\n")
+            # Add RSSI if available in AUX_ADV_IND
+            if "AUX_ADV_IND" in dc:
+                field["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+            # Add MAC if available in AdvData
             if "AdvData" in field:
                 try:
                     fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
                     for field_decoded in fields:
                         field_decoded["MAC"] = mac
+                        
+                        # Add RSSI to decoded fields if available
+                        if "AUX_ADV_IND" in dc:
+                            field_decoded["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                        
                         json_data = json.dumps(field_decoded)
                         if pub:
                             pub.send_string(json_data)
@@ -170,6 +180,7 @@ def process_decoded_data(dc, pub):
                 except Exception as e:
                     if verbose:
                         log("JSON Dump Error:", e)
+            
             if verbose:
                 print()
             sys.stdout.flush()
@@ -251,3 +262,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
