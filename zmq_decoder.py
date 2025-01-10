@@ -152,7 +152,9 @@ def process_decoded_data(dc, pub):
                                 for msg in json_obj:
                                     if "Basic ID" in msg:
                                         adv_a = dc["aext"]["AdvA"].split()[0]
-                                        msg["Basic ID"]["MAC"] = adv_a  # Append MAC to BT JSON
+                                        msg["Basic ID"]["MAC"] = adv_a
+                                        # Add RSSI from AUX_ADV_IND
+                                        msg["Basic ID"]["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
                             json_data = json.dumps(json_obj)
                         except json.JSONDecodeError:
                             pass
@@ -169,12 +171,19 @@ def process_decoded_data(dc, pub):
     elif "DroneID" in dc:
         for mac, field in dc["DroneID"].items():
             if verbose:
-                print("Open Drone ID Wi-Fi\n-------------------------\n")
+                print("Open Drone ID WIFI\n-------------------------\n")
+            if "AUX_ADV_IND" in dc:
+                field["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
             if "AdvData" in field:
                 try:
                     fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
                     for field_decoded in fields:
                         field_decoded["MAC"] = mac
+                        
+                        # Add RSSI to decoded fields if available
+                        if "AUX_ADV_IND" in dc:
+                            field_decoded["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                        
                         json_data = json.dumps(field_decoded)
                         if pub:
                             pub.send_string(json_data)
@@ -275,3 +284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
