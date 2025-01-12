@@ -133,7 +133,8 @@ def format_as_zmq_json(parsed_data: dict) -> list:
         "Basic ID": {
             "id_type": "Serial Number (ANSI/CTA-2063-A)",
             "id": parsed_data.get("serial_number", "unknown"),
-            "description": parsed_data.get("device_type", "DJI Drone")
+            "description": parsed_data.get("device_type", "DJI Drone"),
+            "RSSI": parsed_data.get("rssi", None)
         }
     }
     message_list.append(basic_id_message)
