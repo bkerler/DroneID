@@ -25,7 +25,7 @@ import time
 import argparse
 
 # Hardcoded configuration
-ANTSDR_IP = "192.168.1.10"
+ANTSDR_IP = "172.31.100.2"
 ANTSDR_PORT = 41030
 ZMQ_PUB_IP = "127.0.0.1"
 ZMQ_PUB_PORT = 4221  # Port to serve DJI receiver data
