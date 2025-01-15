@@ -75,32 +75,24 @@ def decoder_thread(socket, pub):
             log("Decoder Thread Error:", e)
 
 def uart_listener(uart_device, pub):
-    """Reads ESP32 UART data and forwards it via ZMQ."""
+    """Reads ESP32 UART data line-by-line, forwarding complete JSON via ZMQ."""
     global stop
-    buffer = ""
     with serial.Serial(uart_device, baudrate=115200, timeout=1) as ser:
         while not stop:
-            if ser.in_waiting > 0:
+            # Read one line at a time, which should contain one complete JSON object
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if line:
+                if verbose:
+                    print("UART received line:", line)
                 try:
-                    data = ser.read(ser.in_waiting).decode('utf-8')
-                    buffer += data
-                    if buffer.count("{") == buffer.count("}"):  # Complete JSON
-                        if verbose:
-                            print("UART received:", buffer)
-
-                        try:
-                            dc = json.loads(buffer)
-                            json_data = json.dumps(dc)
-                            if pub:
-                                pub.send_string(json_data)
-                            if verbose:
-                                print(f"Forwarded via ZMQ: {json_data}")
-                            buffer = ""
-                        except json.JSONDecodeError as e:
-                            log("UART JSON Decode Error:", e)
-                            buffer = ""
-                except Exception as e:
-                    log("UART Read Error:", e)
+                    dc = json.loads(line)
+                    json_data = json.dumps(dc)
+                    if pub:
+                        pub.send_string(json_data)
+                    if verbose:
+                        print(f"Forwarded via ZMQ: {json_data}")
+                except json.JSONDecodeError as e:
+                    log("UART JSON Decode Error:", e)
             else:
                 time.sleep(0.1)
 
@@ -134,7 +126,7 @@ def dji_listener(dji_url, pub):
         context.term()
 
 def process_decoded_data(dc, pub):
-    """Processes and forwards the decoded Bluetooth/Wi-Fi data."""
+    """Processes and forwards the decoded Bluetooth/Wi-Fi data, skipping CAA Assigned Registration ID messages."""
     if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
         if "AdvData" in dc:
             try:
@@ -149,17 +141,29 @@ def process_decoded_data(dc, pub):
                         try:
                             json_obj = json.loads(json_data)
                             if isinstance(json_obj, list) and len(json_obj) > 0:
+                                filtered_json_obj = []
                                 for msg in json_obj:
                                     if "Basic ID" in msg:
+                                        # Skip messages with CAA Assigned Registration ID
+                                        if msg["Basic ID"].get('id_type') == 'CAA Assigned Registration ID':
+                                            continue
+                                        
                                         adv_a = dc["aext"]["AdvA"].split()[0]
                                         msg["Basic ID"]["MAC"] = adv_a
                                         # Add RSSI from AUX_ADV_IND
                                         msg["Basic ID"]["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
-                            json_data = json.dumps(json_obj)
+                                        filtered_json_obj.append(msg)
+                                        
+                                # Proceed only if we have non-empty filtered list
+                                if not filtered_json_obj:
+                                    return  # Exit the function instead of using continue
+                                
+                                json_data = json.dumps(filtered_json_obj)
+                                
                         except json.JSONDecodeError:
-                            pass
-
-                    if pub:
+                            return  # Exit the function instead of continue
+                        
+                    if pub and json_data:
                         pub.send_string(json_data)
                     if verbose:
                         print(json_data)
@@ -169,21 +173,35 @@ def process_decoded_data(dc, pub):
                 log("AdvData Decode Error:", e)
 
     elif "DroneID" in dc:
-        for mac, field in dc["DroneID"].items():
+        for mac, field in list(dc["DroneID"].items()):  # Use list() to create a copy for safe iteration
             if verbose:
                 print("Open Drone ID WIFI\n-------------------------\n")
             if "AUX_ADV_IND" in dc:
                 field["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                
+            # Skip if the entire field has CAA Assigned Registration ID
+            if field.get('id_type') == 'CAA Assigned Registration ID':
+                continue
+        
             if "AdvData" in field:
                 try:
                     fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
+                    filtered_fields = []
                     for field_decoded in fields:
+                        # Skip messages with CAA Assigned Registration ID
+                        if field_decoded.get('id_type') == 'CAA Assigned Registration ID':
+                            continue
+                        
                         field_decoded["MAC"] = mac
                         
                         # Add RSSI to decoded fields if available
                         if "AUX_ADV_IND" in dc:
                             field_decoded["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                            
+                        filtered_fields.append(field_decoded)
                         
+                    # Process only if we have non-empty filtered list
+                    for field_decoded in filtered_fields:
                         json_data = json.dumps(field_decoded)
                         if pub:
                             pub.send_string(json_data)
@@ -284,4 +302,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
     
