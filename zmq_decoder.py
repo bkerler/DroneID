@@ -1,5 +1,4 @@
-
-    #!/usr/bin/env python3
+#!/usr/bin/env python3
 # (c) 2024 B.Kerler
 import json
 import sys
