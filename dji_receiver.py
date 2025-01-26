@@ -221,8 +221,8 @@ def format_as_zmq_json(parsed_data: dict) -> list:
         system_msg_dict = {}
 
         if has_valid_pilot:
-            system_msg_dict["operator_lat"] = parsed_data["app_lat"]
-            system_msg_dict["operator_lon"] = parsed_data["app_lon"]
+            system_msg_dict["latitude"] = parsed_data["app_lat"]
+            system_msg_dict["longitude"] = parsed_data["app_lon"]
 
         if has_valid_home:
             system_msg_dict["home_lat"] = parsed_data["home_lat"]
