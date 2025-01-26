@@ -79,15 +79,12 @@ def parse_data_1(data: bytes) -> dict:
     try:
         serial_number = data[:64].decode('utf-8').rstrip('\x00')
         device_type   = data[64:128].decode('utf-8').rstrip('\x00')
-
         # Pilot home lat/lon
         app_lat = struct.unpack('<d', data[129:137])[0]
         app_lon = struct.unpack('<d', data[137:145])[0]
-
         # Drone lat/lon
         drone_lat = struct.unpack('<d', data[145:153])[0]
         drone_lon = struct.unpack('<d', data[153:161])[0]
-
         # Height and altitude
         height_agl        = struct.unpack('<d', data[161:169])[0]
         geodetic_altitude = struct.unpack('<d', data[169:177])[0]
@@ -134,8 +131,6 @@ def format_as_zmq_json(parsed_data: dict) -> list:
     """
     Formats the parsed data into a ZMQ-compatible list of messages,
     e.g. [ {"Basic ID": {...}}, {"Location/Vector Message": {...}}, ... ].
-    
-    Option A: Provide "Home Message" as a separate block if valid.
     """
     if not parsed_data:
         return []
@@ -174,25 +169,29 @@ def format_as_zmq_json(parsed_data: dict) -> list:
     }
     message_list.append(self_id_message)
 
-    # System Message (pilot location if valid)
-    if is_valid_latlon(parsed_data["app_lat"], parsed_data["app_lon"]):
-        system_message = {
-            "System Message": {
-                "latitude": parsed_data["app_lat"],
-                "longitude": parsed_data["app_lon"]
-            }
-        }
-        message_list.append(system_message)
+    # System Message (Combine pilot & home location under System Message)
+    # We create the System Message if we have at least pilot or home coords in valid range
+    has_valid_pilot = is_valid_latlon(parsed_data["app_lat"], parsed_data["app_lon"])
+    has_valid_home  = is_valid_latlon(parsed_data["home_lat"], parsed_data["home_lon"])
+    if has_valid_pilot or has_valid_home:
+        system_msg_dict = {}
 
-    # Home Message (separate block, non-standard, if valid)
-    if is_valid_latlon(parsed_data["home_lat"], parsed_data["home_lon"]):
-        home_message = {
-            "Home Message": {
-                "home_lat": parsed_data["home_lat"],
-                "home_lon": parsed_data["home_lon"]
+        # Add pilot lat/lon if valid
+        if has_valid_pilot:
+            system_msg_dict["operator_lat"] = parsed_data["app_lat"]
+            system_msg_dict["operator_lon"] = parsed_data["app_lon"]
+
+        # Add home lat/lon if valid
+        if has_valid_home:
+            system_msg_dict["home_lat"] = parsed_data["home_lat"]
+            system_msg_dict["home_lon"] = parsed_data["home_lon"]
+
+        # Only append if we have anything at all
+        if system_msg_dict:
+            system_message = {
+                "System Message": system_msg_dict
             }
-        }
-        message_list.append(home_message)
+            message_list.append(system_message)
 
     return message_list
 
