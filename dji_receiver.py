@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 dji_receiver.py
+cemaxecuter 2025
 
 Connects to AntSDR, receives DJI DroneID data, converts it to a ZMQ-compatible JSON format,
 and publishes it via an efficient ZMQ XPUB socket.
@@ -77,20 +78,29 @@ def parse_data_1(data: bytes) -> dict:
     """
     try:
         serial_number = data[:64].decode('utf-8').rstrip('\x00')
-        device_type = data[64:128].decode('utf-8').rstrip('\x00')
+        device_type   = data[64:128].decode('utf-8').rstrip('\x00')
+
         # Pilot home lat/lon
         app_lat = struct.unpack('<d', data[129:137])[0]
         app_lon = struct.unpack('<d', data[137:145])[0]
+
         # Drone lat/lon
         drone_lat = struct.unpack('<d', data[145:153])[0]
         drone_lon = struct.unpack('<d', data[153:161])[0]
+
         # Height and altitude
-        height_agl = struct.unpack('<d', data[161:169])[0]
+        height_agl        = struct.unpack('<d', data[161:169])[0]
         geodetic_altitude = struct.unpack('<d', data[169:177])[0]
+
+        # Home lat/lon (Return-to-home position)
+        home_lat = struct.unpack('<d', data[177:185])[0]
+        home_lon = struct.unpack('<d', data[185:193])[0]
+
         # Speeds
         speed_e = struct.unpack('<d', data[201:209])[0]  # East
         speed_n = struct.unpack('<d', data[209:217])[0]  # North
         speed_u = struct.unpack('<d', data[217:225])[0]  # Vertical
+
         # RSSI
         rssi = struct.unpack('<h', data[225:227])[0]
 
@@ -108,7 +118,9 @@ def parse_data_1(data: bytes) -> dict:
             "geodetic_altitude": geodetic_altitude,
             "horizontal_speed": horizontal_speed,
             "vertical_speed": speed_u,
-            "rssi": rssi
+            "rssi": rssi,
+            "home_lat": home_lat,
+            "home_lon": home_lon
         }
     except (UnicodeDecodeError, struct.error) as e:
         logging.error(f"Error parsing data: {e}")
@@ -122,6 +134,8 @@ def format_as_zmq_json(parsed_data: dict) -> list:
     """
     Formats the parsed data into a ZMQ-compatible list of messages,
     e.g. [ {"Basic ID": {...}}, {"Location/Vector Message": {...}}, ... ].
+    
+    Option A: Provide "Home Message" as a separate block if valid.
     """
     if not parsed_data:
         return []
@@ -169,6 +183,16 @@ def format_as_zmq_json(parsed_data: dict) -> list:
             }
         }
         message_list.append(system_message)
+
+    # Home Message (separate block, non-standard, if valid)
+    if is_valid_latlon(parsed_data["home_lat"], parsed_data["home_lon"]):
+        home_message = {
+            "Home Message": {
+                "home_lat": parsed_data["home_lat"],
+                "home_lon": parsed_data["home_lon"]
+            }
+        }
+        message_list.append(home_message)
 
     return message_list
 
