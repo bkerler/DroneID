@@ -66,6 +66,7 @@ def main():
     aparse.add_argument("--interface", help="Define zmq host")
     aparse.add_argument("--pcap", help="Use pcap file")
     aparse.add_argument("-v", "--verbose", action="store_true", help="Print messages")
+    aparse.add_argument("-g", action="store_true", help="Use 5Ghz channel 149")
     args = aparse.parse_args()
     current_python_executable = cexec(["readlink", "-f", f"{sys.executable}"]).replace("\n", "")
     res = cexec(["getcap", f"{current_python_executable}"])
@@ -86,14 +87,18 @@ def main():
     else:
         print("--pcap [file.pcapng] or --interface [wifi_monitor_interface] needed")
         exit(1)
+    if args.g:
+        channel = 149
+    else:
+        channel = 6
 
     if interface is not None:
         i2d = extract_wifi_if_details(interface)
         if not enable_monitor_mode(i2d, interface):
             sys.stdout.flush()
             exit(1)
-        print("Setting wifi channel 6")
-        set_interface_channel(interface,6)
+        print(f"Setting wifi channel {channel}")
+        set_interface_channel(interface,channel)
 
     zthread = None
     if args.zmq:
