@@ -58,7 +58,7 @@ def filter_frames(packet: Packet) -> None:
 def main():
     global verbose
     global socket
-    info = "Host-side receiver for OpenDrone ID wifi (c) B.Kerler 2024"
+    info = "Host-side receiver for OpenDrone ID wifi (c) B.Kerler 2024-2025"
     print(info)
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable zmq")
