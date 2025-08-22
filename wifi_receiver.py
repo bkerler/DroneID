@@ -32,31 +32,40 @@ def _have_raw_caps() -> bool:
         # Treat other errors as non-fatal for this probe.
         return True
 
-def _first_usb_wifi_iface() -> str | None:
-    """
-    Prefer a USB-backed wireless interface.
-    Heuristic: /sys/class/net/<if>/wireless exists AND its realpath contains '/usb/'.
-    """
+def _list_wireless_ifaces() -> list[str]:
     sys_class = Path("/sys/class/net")
     if not sys_class.exists():
-        return None
-    candidates = []
+        return []
+    out = []
     for ifdir in sys_class.iterdir():
         ifname = ifdir.name
         if ifname == "lo":
             continue
-        # Wireless?
-        if not (ifdir / "wireless").exists():
-            continue
-        # Is device path under USB?
-        try:
-            devpath = (ifdir / "device").resolve()
-        except Exception:
-            continue
-        if "/usb/" in str(devpath):
-            candidates.append(ifname)
-    if candidates:
-        return sorted(candidates)[0]
+        if (ifdir / "wireless").exists():
+            out.append(ifname)
+    return out
+
+def _first_usb_wifi_iface() -> str | None:
+    """
+    Minimal, robust heuristic:
+      - Prefer wireless ifaces whose names start with 'wl' AND len(name) > 6
+        (e.g., 'wlx9cefd5feec' typical for USB/udev MAC naming)
+      - Within those, prefer names starting with 'wlx'
+      - If none, and exactly one wireless iface exists, pick it
+      - Else return None to trigger the existing interactive picker
+    """
+    wl_ifaces = _list_wireless_ifaces()
+    long_wl = [i for i in wl_ifaces if i.startswith("wl") and len(i) > 6]
+
+    if long_wl:
+        wlx_first = sorted([i for i in long_wl if i.startswith("wlx")])
+        if wlx_first:
+            return wlx_first[0]
+        return sorted(long_wl)[0]
+
+    if len(wl_ifaces) == 1:
+        return wl_ifaces[0]
+
     return None
 
 def pcapng_parser(filename: str):
@@ -125,7 +134,7 @@ def main():
         verbose = True
 
     if args.interface is None and args.pcap is None:
-        # Prefer a USB Wi-Fi NIC (wlx* typically), else fall back to existing selection
+        # Prefer a long-named wl* (typically USB) iface; else fall back to existing selection
         interface = _first_usb_wifi_iface()
         if interface is None:
             interface = get_iw_interfaces(interfaces)
@@ -136,6 +145,9 @@ def main():
     else:
         print("--pcap [file.pcapng] or --interface [wifi_monitor_interface] needed")
         exit(1)
+
+    if verbose:
+        print(f"[auto] selected interface: {interface}")
 
     if args.g:
         channel = 149
