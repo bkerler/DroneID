@@ -29,28 +29,42 @@ def cexec(command, pipe=''):
     return stdout_data
 
 def sudo(command):
+    """
+    Run privileged commands.
+
+    Behavior:
+      - If running as root -> run directly (no sudo).
+      - If NON-interactive (systemd, pipes, cron):
+          * If we have caps -> run directly (no prompt).
+          * Else -> run directly (fail fast; no prompt).
+      - If interactive TTY (human at a shell):
+          * Always prompt once and run via sudo -S.
+            (Restores your old "ask for password" behavior.)
+    """
     global sudopw
     euid = os.geteuid()
 
-    # If running as root OR we have needed caps, do NOT use sudo or prompt.
-    if euid == 0 or _have_raw_caps():
-        pr = list(command)
-        return cexec(pr)
+    # Root: no sudo needed
+    if euid == 0:
+        return cexec(list(command))
 
-    # No caps and not root: if interactive TTY, prompt once for sudo password.
-    # If non-interactive (e.g., systemd), do NOT prompt (avoid hanging); run directly and let it fail fast.
-    if sudopw is None and sys.stdin.isatty() and 'SUDO_UID' not in os.environ:
+    # Non-interactive (e.g., systemd): never prompt
+    if not sys.stdin.isatty():
+        # If process has caps, direct works; otherwise it will fail fast (logged)
+        return cexec(list(command))
+
+    # Interactive TTY: prompt once and use sudo -S
+    if sudopw is None and 'SUDO_UID' not in os.environ:
         try:
             sudopw = pwinput.pwinput('Enter your sudo password: ')
-        except:
+        except Exception:
             sudopw = getpass('Enter your sudo password: ')
 
     if sudopw:
-        pr = ["sudo", "-S"] + list(command)
-        return cexec(pr, pipe=sudopw)
+        return cexec(["sudo", "-S", *list(command)], pipe=sudopw)
     else:
-        pr = list(command)
-        return cexec(pr)
+        # If user refused a password, attempt direct (likely to fail), but don't hang
+        return cexec(list(command))
 
 def channel_hopping(interface):
     try:
