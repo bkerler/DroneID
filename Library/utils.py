@@ -2,31 +2,55 @@ from getpass import getpass
 
 import pwinput
 import os
+import sys
+import socket as pysock
 from scapy.all import *
 from subprocess import Popen, PIPE
 sudopw = None
 
+def _have_raw_caps() -> bool:
+    """
+    Return True if current process can open an AF_PACKET raw socket.
+    This is a practical probe that usually indicates CAP_NET_RAW (and, in your unit, CAP_NET_ADMIN too).
+    """
+    try:
+        s = pysock.socket(pysock.AF_PACKET, pysock.SOCK_RAW, 0)
+        s.close()
+        return True
+    except PermissionError:
+        return False
+    except Exception:
+        # Treat other errors as non-fatal for this probe.
+        return True
+
 def cexec(command, pipe=''):
     p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE, text=True)
-    stdout_data = p.communicate(input=pipe)
-    return stdout_data[0]
+    stdout_data, stderr_data = p.communicate(input=pipe)
+    return stdout_data
 
 def sudo(command):
     global sudopw
     euid = os.geteuid()
-    if euid != 0:
-        if sudopw is None and not 'SUDO_UID' in os.environ:
-            try:
-                sudopw = pwinput.pwinput('Enter your sudo password: ')
-            except:
-                sudopw = getpass('Enter your sudo password: ')
-        pr = ["sudo", "-S"]
+
+    # If running as root OR we have needed caps, do NOT use sudo or prompt.
+    if euid == 0 or _have_raw_caps():
+        pr = list(command)
+        return cexec(pr)
+
+    # No caps and not root: if interactive TTY, prompt once for sudo password.
+    # If non-interactive (e.g., systemd), do NOT prompt (avoid hanging); run directly and let it fail fast.
+    if sudopw is None and sys.stdin.isatty() and 'SUDO_UID' not in os.environ:
+        try:
+            sudopw = pwinput.pwinput('Enter your sudo password: ')
+        except:
+            sudopw = getpass('Enter your sudo password: ')
+
+    if sudopw:
+        pr = ["sudo", "-S"] + list(command)
+        return cexec(pr, pipe=sudopw)
     else:
-        pr = []
-    for cmd in command:
-        pr.append(cmd)
-    res = cexec(pipe=sudopw, command=pr)
-    return res
+        pr = list(command)
+        return cexec(pr)
 
 def channel_hopping(interface):
     try:
@@ -79,6 +103,7 @@ def enable_monitor_mode(i2d, interface):
             res = False
         sudo(["ip", "link", "set", f"{interface}", "up"])
     return res
+
 def enable_managed_mode(i2d, interface):
     info = cexec(["iw", i2d[interface][0], "info"])
     if "* managed" not in info:
@@ -112,7 +137,6 @@ def extract_wifi_if_details(interface):
         print("Invalid interface chosen.")
         exit(1)
     return i2d
-
 
 def get_iw_interfaces(interfaces):
     print("Found interfaces:\n-----------------")
