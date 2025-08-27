@@ -135,6 +135,7 @@ def dji_listener(dji_url, pub):
 
 def process_decoded_data(dc, pub):
     """Processes and forwards the decoded Bluetooth/Wi-Fi data."""
+    # --- BLE path (unchanged behavior) ---
     if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
         if "AdvData" in dc:
             try:
@@ -168,41 +169,54 @@ def process_decoded_data(dc, pub):
             except ValueError as e:
                 log("AdvData Decode Error:", e)
 
+    # --- Wi-Fi path (CHANGED: always publish a list like BLE) ---
     elif "DroneID" in dc:
         for mac, field in dc["DroneID"].items():
             if verbose:
                 print("Open Drone ID WIFI\n-------------------------\n")
-            if "AUX_ADV_IND" in dc:
-                field["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+
+            merged = []  # CHANGED: accumulate decoded messages to publish as a list
+
+            # If we have raw AdvData, decode into multiple messages
             if "AdvData" in field:
                 try:
                     fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
                     for field_decoded in fields:
                         field_decoded["MAC"] = mac
-                        
                         # Add RSSI to decoded fields if available
                         if "AUX_ADV_IND" in dc:
                             field_decoded["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
-                        
-                        json_data = json.dumps(field_decoded)
-                        if pub:
-                            pub.send_string(json_data)
-                        if verbose:
-                            print(json_data)
+                        merged.append(field_decoded)  # CHANGED
                 except Exception as e:
                     log("Decoding Error:", e)
             else:
-                try:
-                    field["MAC"] = mac
-                    json_data = json.dumps(field)
-                    if pub:
-                        pub.send_string(json_data)
-                    if verbose:
-                        print(json_data)
-                except Exception as e:
-                    log("JSON Dump Error:", e)
-            if verbose:
-                print()
+                # CHANGED: No AdvData present — still emit a list with a minimal entry
+                entry = {"MAC": mac}
+                if "AUX_ADV_IND" in dc:
+                    entry["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                # If a pre-parsed structure is already in 'field', keep it alongside MAC/RSSI
+                # but ensure we output a list for consistency with BLE
+                if field:
+                    try:
+                        # shallow copy to avoid mutating original
+                        base = dict(field)
+                        base["MAC"] = entry["MAC"]
+                        if "RSSI" in entry:
+                            base["RSSI"] = entry["RSSI"]
+                        merged.append(base)
+                    except Exception:
+                        merged.append(entry)
+                else:
+                    merged.append(entry)
+
+            # CHANGED: Publish once as a JSON array (BLE-style)
+            if merged:
+                json_data = json.dumps(merged)
+                if pub:
+                    pub.send_string(json_data)
+                if verbose:
+                    print(json_data)
+                print() if verbose else None
             sys.stdout.flush()
 
 def main():
@@ -284,3 +298,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
