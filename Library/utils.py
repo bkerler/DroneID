@@ -2,31 +2,69 @@ from getpass import getpass
 
 import pwinput
 import os
+import sys
+import socket as pysock
 from scapy.all import *
 from subprocess import Popen, PIPE
 sudopw = None
 
+def _have_raw_caps() -> bool:
+    """
+    Return True if current process can open an AF_PACKET raw socket.
+    This is a practical probe that usually indicates CAP_NET_RAW (and, in your unit, CAP_NET_ADMIN too).
+    """
+    try:
+        s = pysock.socket(pysock.AF_PACKET, pysock.SOCK_RAW, 0)
+        s.close()
+        return True
+    except PermissionError:
+        return False
+    except Exception:
+        # Treat other errors as non-fatal for this probe.
+        return True
+
 def cexec(command, pipe=''):
     p = Popen(command, stdout=PIPE, stdin=PIPE, stderr=PIPE, text=True)
-    stdout_data = p.communicate(input=pipe)
-    return stdout_data[0]
+    stdout_data, stderr_data = p.communicate(input=pipe)
+    return stdout_data
 
 def sudo(command):
+    """
+    Run privileged commands.
+
+    Behavior:
+      - If running as root -> run directly (no sudo).
+      - If NON-interactive (systemd, pipes, cron):
+          * If we have caps -> run directly (no prompt).
+          * Else -> run directly (fail fast; no prompt).
+      - If interactive TTY (human at a shell):
+          * Always prompt once and run via sudo -S.
+            (Restores your old "ask for password" behavior.)
+    """
     global sudopw
     euid = os.geteuid()
-    if euid != 0:
-        if sudopw is None and not 'SUDO_UID' in os.environ:
-            try:
-                sudopw = pwinput.pwinput('Enter your sudo password: ')
-            except:
-                sudopw = getpass('Enter your sudo password: ')
-        pr = ["sudo", "-S"]
+
+    # Root: no sudo needed
+    if euid == 0:
+        return cexec(list(command))
+
+    # Non-interactive (e.g., systemd): never prompt
+    if not sys.stdin.isatty():
+        # If process has caps, direct works; otherwise it will fail fast (logged)
+        return cexec(list(command))
+
+    # Interactive TTY: prompt once and use sudo -S
+    if sudopw is None and 'SUDO_UID' not in os.environ:
+        try:
+            sudopw = pwinput.pwinput('Enter your sudo password: ')
+        except Exception:
+            sudopw = getpass('Enter your sudo password: ')
+
+    if sudopw:
+        return cexec(["sudo", "-S", *list(command)], pipe=sudopw)
     else:
-        pr = []
-    for cmd in command:
-        pr.append(cmd)
-    res = cexec(pipe=sudopw, command=pr)
-    return res
+        # If user refused a password, attempt direct (likely to fail), but don't hang
+        return cexec(list(command))
 
 def channel_hopping(interface):
     try:
@@ -79,6 +117,7 @@ def enable_monitor_mode(i2d, interface):
             res = False
         sudo(["ip", "link", "set", f"{interface}", "up"])
     return res
+
 def enable_managed_mode(i2d, interface):
     info = cexec(["iw", i2d[interface][0], "info"])
     if "* managed" not in info:
@@ -112,7 +151,6 @@ def extract_wifi_if_details(interface):
         print("Invalid interface chosen.")
         exit(1)
     return i2d
-
 
 def get_iw_interfaces(interfaces):
     print("Found interfaces:\n-----------------")

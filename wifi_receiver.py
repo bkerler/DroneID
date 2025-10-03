@@ -2,9 +2,13 @@
 # (c) 2024 B.Kerler
 import os
 import sys
+import time
 from subprocess import Popen, PIPE, STDOUT
 import argparse
 import json
+from pathlib import Path
+import socket as pysock
+
 from Library.utils import search_interfaces, get_iw_interfaces, extract_wifi_if_details, enable_monitor_mode, \
     set_interface_channel, cexec, enable_managed_mode
 from OpenDroneID.wifi_parser import oui_to_parser
@@ -16,6 +20,54 @@ verbose = False
 context = zmq.Context()
 socket = None
 
+def _have_raw_caps() -> bool:
+    """Return True if current process can open an AF_PACKET raw socket."""
+    try:
+        s = pysock.socket(pysock.AF_PACKET, pysock.SOCK_RAW, 0)
+        s.close()
+        return True
+    except PermissionError:
+        return False
+    except Exception:
+        # Treat other errors as non-fatal for this probe.
+        return True
+
+def _list_wireless_ifaces() -> list[str]:
+    sys_class = Path("/sys/class/net")
+    if not sys_class.exists():
+        return []
+    out = []
+    for ifdir in sys_class.iterdir():
+        ifname = ifdir.name
+        if ifname == "lo":
+            continue
+        if (ifdir / "wireless").exists():
+            out.append(ifname)
+    return out
+
+def _first_usb_wifi_iface() -> str | None:
+    """
+    Minimal, robust heuristic:
+      - Prefer wireless ifaces whose names start with 'wl' AND len(name) > 6
+        (e.g., 'wlx9cefd5feec' typical for USB/udev MAC naming)
+      - Within those, prefer names starting with 'wlx'
+      - If none, and exactly one wireless iface exists, pick it
+      - Else return None to trigger the existing interactive picker
+    """
+    wl_ifaces = _list_wireless_ifaces()
+    long_wl = [i for i in wl_ifaces if i.startswith("wl") and len(i) > 6]
+
+    if long_wl:
+        wlx_first = sorted([i for i in long_wl if i.startswith("wlx")])
+        if wlx_first:
+            return wlx_first[0]
+        return sorted(long_wl)[0]
+
+    if len(wl_ifaces) == 1:
+        return wl_ifaces[0]
+
+    return None
+
 def pcapng_parser(filename: str):
     while True:
         for packet in PcapReader(filename):
@@ -25,7 +77,6 @@ def pcapng_parser(filename: str):
                 pass
             except KeyboardInterrupt:
                 break
-
 
 def filter_frames(packet: Packet) -> None:
     global socket
@@ -68,18 +119,25 @@ def main():
     aparse.add_argument("-v", "--verbose", action="store_true", help="Print messages")
     aparse.add_argument("-g", action="store_true", help="Use 5Ghz channel 149")
     args = aparse.parse_args()
-    current_python_executable = cexec(["readlink", "-f", f"{sys.executable}"]).replace("\n", "")
-    res = cexec(["getcap", f"{current_python_executable}"])
-    if not "cap_net_admin" in res or not "cap_net_raw" in res:
+
+    # Runtime capability check (works with systemd AmbientCapabilities or setcap)
+    if os.geteuid() != 0 and not _have_raw_caps():
         print(
-            f"Please run: \"sudo setcap 'CAP_NET_RAW+eip CAP_NET_ADMIN+eip' {current_python_executable}\" before running this script.")
+            "Missing CAP_NET_RAW/CAP_NET_ADMIN. Either:\n"
+            f"  sudo setcap 'CAP_NET_RAW+eip CAP_NET_ADMIN+eip' {sys.executable}\n"
+            "or run via systemd with AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN.\n"
+        )
         exit(1)
 
     interfaces = search_interfaces()
     if args.verbose:
         verbose = True
+
     if args.interface is None and args.pcap is None:
-        interface = get_iw_interfaces(interfaces)
+        # Prefer a long-named wl* (typically USB) iface; else fall back to existing selection
+        interface = _first_usb_wifi_iface()
+        if interface is None:
+            interface = get_iw_interfaces(interfaces)
     elif args.interface is not None:
         interface = args.interface
     elif args.pcap is not None:
@@ -92,13 +150,21 @@ def main():
     else:
         channel = 6
 
+    if verbose:
+        print(f"[auto] selected interface: {interface}")
+
+    if args.g:
+        channel = 149
+    else:
+        channel = 6
+
     if interface is not None:
         i2d = extract_wifi_if_details(interface)
         if not enable_monitor_mode(i2d, interface):
             sys.stdout.flush()
             exit(1)
         print(f"Setting wifi channel {channel}")
-        set_interface_channel(interface,channel)
+        set_interface_channel(interface, channel)
 
     zthread = None
     if args.zmq:
@@ -131,7 +197,7 @@ def main():
     if interface is not None:
         sniffer = AsyncSniffer(
             iface=interface,
-            lfilter=lambda s: s.getlayer(Dot11).subtype==0x8,
+            lfilter=lambda s: s.getlayer(Dot11).subtype == 0x8,
             prn=filter_frames,
         )
         sniffer.start()
@@ -148,13 +214,9 @@ def main():
             zthread.join()
         if interface is not None:
             i2d = extract_wifi_if_details(interface)
-            enable_managed_mode(i2d,interface)
+            enable_managed_mode(i2d, interface)
     else:
         pcapng_parser(args.pcap)
-
-
-
-
 
 if __name__ == "__main__":
     main()

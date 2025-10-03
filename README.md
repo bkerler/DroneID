@@ -2,14 +2,17 @@
 
 ## Installation
 ```bash
+git clone https://github.com/bkerler/DroneID.git
+cd DroneID
+git submodule init
+git submodule update
 ./setup.sh
 ```
 
 ## Run
 
 ### 1. Bluetooth receiver (using Sonoff Dongle)
-1. Get sniffle from [here](https://github.com/bkerler/sniffle) and install
-2. Run 
+1. Run 
 ```bash
 ./bluetooth_receiver.py -b 2000000 -s /dev/ttyUSB1 --zmqsetting 127.0.0.1:4222 -v
 ```

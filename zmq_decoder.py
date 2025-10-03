@@ -13,7 +13,6 @@ from OpenDroneID.utils import structhelper_io
 verbose = False  # Global variable to control verbosity
 stop = False
 
-
 def log(*msg):
     """Logs messages to stderr if verbose is enabled."""
     global verbose
@@ -21,8 +20,8 @@ def log(*msg):
         s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"{s}:", *msg, end="\n", file=sys.stderr)
 
-
 def zmq_thread(pub_socket):
+    """Handles ZMQ subscriber notifications."""
     global stop
     try:
         while not stop:
@@ -40,8 +39,8 @@ def zmq_thread(pub_socket):
     except zmq.error.ContextTerminated:
         pass
 
-
 def decoder_thread(socket, pub):
+    """Handles Bluetooth/Wi-Fi OpenDroneID messages."""
     global stop
     poller = zmq.Poller()
     poller.register(socket, zmq.POLLIN)
@@ -66,6 +65,8 @@ def decoder_thread(socket, pub):
 
                     if verbose:
                         print("ZMQ Data Received:", json.dumps(dc, indent=2))
+                    
+                    # Process Bluetooth/Wi-Fi data
                     process_decoded_data(dc, pub)
     except zmq.error.ContextTerminated:
         pass
@@ -73,8 +74,8 @@ def decoder_thread(socket, pub):
         if verbose:
             log("Decoder Thread Error:", e)
 
-
 def uart_listener(uart_device, pub):
+    """Reads ESP32 UART data and forwards it via ZMQ."""
     global stop
     buffer = ""
     with serial.Serial(uart_device, baudrate=115200, timeout=1) as ser:
@@ -83,8 +84,7 @@ def uart_listener(uart_device, pub):
                 try:
                     data = ser.read(ser.in_waiting).decode('utf-8')
                     buffer += data
-                    # Process only when a complete JSON message is detected
-                    if buffer.count("{") == buffer.count("}"):
+                    if buffer.count("{") == buffer.count("}"):  # Complete JSON
                         if verbose:
                             print("UART received:", buffer)
 
@@ -97,18 +97,45 @@ def uart_listener(uart_device, pub):
                                 print(f"Forwarded via ZMQ: {json_data}")
                             buffer = ""
                         except json.JSONDecodeError as e:
-                            if verbose:
-                                log("UART JSON Decode Error:", e)
+                            log("UART JSON Decode Error:", e)
                             buffer = ""
                 except Exception as e:
-                    if verbose:
-                        log("UART Read Error:", e)
+                    log("UART Read Error:", e)
             else:
                 time.sleep(0.1)
 
+def dji_listener(dji_url, pub):
+    """Subscribes to DJI Receiver and forwards data as-is."""
+    global stop
+    context = zmq.Context()
+    socket = context.socket(zmq.SUB)
+    socket.setsockopt(zmq.SUBSCRIBE, b'')  # Subscribe to all messages
+    try:
+        socket.connect(f"tcp://{dji_url}")
+        log(f"Connected to DJI Receiver at {dji_url}")
+        poller = zmq.Poller()
+        poller.register(socket, zmq.POLLIN)
+        while not stop:
+            socks = dict(poller.poll(3000))  # Poll every 3 seconds
+            if socket in socks and socks[socket] == zmq.POLLIN:
+                try:
+                    data = socket.recv_string()
+                    if pub:
+                        pub.send_string(data)  # Forward raw DJI data
+                    if verbose:
+                        log(f"DJI Data Forwarded: {data}")
+                except zmq.ZMQError as e:
+                    log("DJI ZMQ Error:", e)
+                    continue
+    except zmq.error.ZMQError as e:
+        log(f"Error connecting to DJI Receiver at {dji_url}: {e}")
+    finally:
+        socket.close()
+        context.term()
 
 def process_decoded_data(dc, pub):
-    """Processes and forwards the decoded data via ZMQ."""
+    """Processes and forwards the decoded Bluetooth/Wi-Fi data."""
+    # --- BLE path (unchanged behavior) ---
     if "AUX_ADV_IND" in dc and "aa" in dc["AUX_ADV_IND"] and dc["AUX_ADV_IND"]["aa"] == 0x8e89bed6:
         if "AdvData" in dc:
             try:
@@ -117,6 +144,22 @@ def process_decoded_data(dc, pub):
                     if verbose:
                         print("Open Drone ID BT4/BT5\n-------------------------\n")
                     json_data = decode_ble(advdata)
+
+                    # Add AdvA address to JSON if available
+                    if "aext" in dc and "AdvA" in dc["aext"]:
+                        try:
+                            json_obj = json.loads(json_data)
+                            if isinstance(json_obj, list) and len(json_obj) > 0:
+                                for msg in json_obj:
+                                    if "Basic ID" in msg:
+                                        adv_a = dc["aext"]["AdvA"].split()[0]
+                                        msg["Basic ID"]["MAC"] = adv_a
+                                        # Add RSSI from AUX_ADV_IND
+                                        msg["Basic ID"]["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                            json_data = json.dumps(json_obj)
+                        except json.JSONDecodeError:
+                            pass
+
                     if pub:
                         pub.send_string(json_data)
                     if verbose:
@@ -124,53 +167,68 @@ def process_decoded_data(dc, pub):
                         print()
                     sys.stdout.flush()
             except ValueError as e:
-                if verbose:
-                    log("AdvData Decode Error:", e)
+                log("AdvData Decode Error:", e)
 
+    # --- Wi-Fi path (CHANGED: always publish a list like BLE) ---
     elif "DroneID" in dc:
         for mac, field in dc["DroneID"].items():
             if verbose:
                 print("Open Drone ID WIFI\n-------------------------\n")
+
+            merged = []  # CHANGED: accumulate decoded messages to publish as a list
+
+            # If we have raw AdvData, decode into multiple messages
             if "AdvData" in field:
                 try:
                     fields = decode(structhelper_io(bytes.fromhex(field["AdvData"])))
                     for field_decoded in fields:
                         field_decoded["MAC"] = mac
-                        json_data = json.dumps(field_decoded)
-                        if pub:
-                            pub.send_string(json_data)
-                        if verbose:
-                            print(json_data)
+                        # Add RSSI to decoded fields if available
+                        if "AUX_ADV_IND" in dc:
+                            field_decoded["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                        merged.append(field_decoded)  # CHANGED
                 except Exception as e:
-                    if verbose:
-                        log("Decoding Error:", e)
+                    log("Decoding Error:", e)
             else:
-                try:
-                    field["MAC"] = mac
-                    json_data = json.dumps(field)
-                    if pub:
-                        pub.send_string(json_data)
-                    if verbose:
-                        print(json_data)
-                except Exception as e:
-                    if verbose:
-                        log("JSON Dump Error:", e)
-            if verbose:
-                print()
+                # CHANGED: No AdvData present — still emit a list with a minimal entry
+                entry = {"MAC": mac}
+                if "AUX_ADV_IND" in dc:
+                    entry["RSSI"] = dc["AUX_ADV_IND"]["rssi"]
+                # If a pre-parsed structure is already in 'field', keep it alongside MAC/RSSI
+                # but ensure we output a list for consistency with BLE
+                if field:
+                    try:
+                        # shallow copy to avoid mutating original
+                        base = dict(field)
+                        base["MAC"] = entry["MAC"]
+                        if "RSSI" in entry:
+                            base["RSSI"] = entry["RSSI"]
+                        merged.append(base)
+                    except Exception:
+                        merged.append(entry)
+                else:
+                    merged.append(entry)
+
+            # CHANGED: Publish once as a JSON array (BLE-style)
+            if merged:
+                json_data = json.dumps(merged)
+                if pub:
+                    pub.send_string(json_data)
+                if verbose:
+                    print(json_data)
+                print() if verbose else None
             sys.stdout.flush()
 
-
 def main():
-    global stop
-    global verbose
-    verbose = False
-    info = "ZMQ decoder for BLE4/5 + WIFI ZMQ clients (c) B.Kerler 2024"
+    global stop, verbose
+    info = "ZMQ decoder for BLE4/5 + WIFI + DJI ZMQ clients (c) B.Kerler 2024"
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable ZMQ")
     aparse.add_argument("-v", "--verbose", action="store_true", help="Print decoded messages")
     aparse.add_argument("--zmqsetting", default="127.0.0.1:4224", help="Define ZMQ server settings")
     aparse.add_argument("--zmqclients", default="127.0.0.1:4222,127.0.0.1:4223", help="Define Bluetooth/Wi-Fi ZMQ clients")
     aparse.add_argument("--uart", help="UART device for pre-decoded ESP32 data (e.g., /dev/ttyACM0)")
+    aparse.add_argument("--dji", help="DJI receiver ZMQ endpoint (e.g., 127.0.0.1:4221)")
     args = aparse.parse_args()
 
     verbose = args.verbose
@@ -190,11 +248,17 @@ def main():
         pub = None
         zthread = None
 
-    # Set up UART and ZMQ client listeners concurrently
+    # Set up UART listener
     if args.uart:
         uart_thread = Thread(target=uart_listener, args=(args.uart, pub), daemon=True)
         uart_thread.start()
 
+    # Set up DJI listener
+    if args.dji:
+        dji_thread = Thread(target=dji_listener, args=(args.dji, pub), daemon=True, name='dji')
+        dji_thread.start()
+
+    # Set up ZMQ client listeners
     clients = args.zmqclients.split(",")
     subs = []
     for client in clients:
@@ -205,8 +269,7 @@ def main():
         try:
             sub.connect(url)
         except zmq.error.ZMQError as e:
-            if verbose:
-                log(f"Failed to connect to {url}: {e}")
+            log(f"Failed to connect to {url}: {e}")
             continue
 
         dthread = Thread(target=decoder_thread, args=(sub, pub), daemon=True, name=f'decoder-{client}')
@@ -217,8 +280,7 @@ def main():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        if verbose:
-            log("Interrupt received, shutting down...")
+        log("Interrupt received, shutting down...")
     finally:
         stop = True
         if pub:
@@ -228,11 +290,12 @@ def main():
             uart_thread.join()
         for thread in subs:
             thread.join()
+        if args.dji:
+            dji_thread.join()
         if zthread:
             zthread.join()
-        if verbose:
-            log("Shutdown complete.")
-
+        log("Shutdown complete.")
 
 if __name__ == "__main__":
     main()
+
