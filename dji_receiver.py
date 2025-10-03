@@ -39,13 +39,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description="DJI Receiver: Publish DJI DroneID data via ZMQ.")
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Enable debug messages and logging output.")
-    parser.add_argument("--zmqsetting", default="127.0.0.1:4221", help="Define zmq server settings")
-    parser.add_argument("--antsdr", default="172.31.100.2:41030", help="Define AntSDR settings")
+    parser.add_argument("--zmqsetting", default="127.0.0.1:4221", help="Define zmq server settings (default: 127.0.0.1:4221)")
+    parser.add_argument("--antsdr", default="172.31.100.2:41030", help="Define AntSDR settings (default: 172.31.100.2:41030)")
     parser.add_argument("--wardgps", default="", help="Define WarDragon monitor settings")
     parser.add_argument("--wardgpstimeout", default="", help="Define WarDragon monitor receive timeout")
     parser.add_argument("--maxhorizspeed", default="200.0",
-                        help="Define MaxHorizSpeed settings, treat above as invalid")
-    parser.add_argument("--alert_id", default="drone-alert", help="Define alert id")
+                        help="Define MaxHorizSpeed settings, treat above as invalid (default:200.0)")
+    parser.add_argument("--alert_id", default="drone-alert", help="Define alert id (default: \"drone-alert\")")
 
     return parser.parse_args()
 
