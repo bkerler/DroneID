@@ -221,7 +221,7 @@ def process_decoded_data(dc, pub):
 
 def main():
     global stop, verbose
-    info = "ZMQ decoder for BLE4/5 + WIFI + DJI ZMQ clients (c) B.Kerler 2024"
+    info = "ZMQ decoder for BLE4/5 + WIFI + DJI ZMQ clients (c) B.Kerler 2024-2025"
     aparse = argparse.ArgumentParser(description=info)
     aparse.add_argument("-z", "--zmq", action="store_true", help="Enable ZMQ")
     aparse.add_argument("-v", "--verbose", action="store_true", help="Print decoded messages")

@@ -18,7 +18,8 @@ HW = None
 
 
 def main():
-    print("\nOpenDroneID spoofer (c) B.Kerler 2024\n-------------------------------------\n")
+    print("\nOpenDroneID spoofer (c) B.Kerler 2024-2025")
+    print("------------------------------------------")
     aparse = argparse.ArgumentParser(description="OpenID drone spoofer")
     aparse.add_argument("dronefile", default="drone.json", nargs="?")
     aparse.add_argument("-s", "--serport", default=None, help="Sniffer serial port name")
