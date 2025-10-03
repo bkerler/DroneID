@@ -27,21 +27,6 @@ import argparse
 import os
 from typing import Optional, Tuple
 
-# Hardcoded configuration
-ANTSDR_IP = "172.31.100.2"
-ANTSDR_PORT = 41030
-ZMQ_PUB_IP = "127.0.0.1"
-ZMQ_PUB_PORT = 4221  # Port to serve DJI receiver data
-
-# WarDragon monitor ZMQ (provides sensor GPS via JSON).
-# Override via env var WARD_MON_ZMQ if needed (e.g., "tcp://0.0.0.0:4225").
-MON_ZMQ_ENDPOINT = os.getenv("WARD_MON_ZMQ", "tcp://127.0.0.1:4225")
-MON_ZMQ_RECV_TIMEOUT_MS = int(os.getenv("WARD_MON_RECV_TIMEOUT_MS", "50"))
-
-# Fallback/Validation constants
-MAX_HORIZONTAL_SPEED = 200.0        # m/s; above this, treat as invalid
-ALERT_ID = "drone-alert"            # standardized ID when position/serial is unknown
-
 # Cached sensor GPS from the monitor: (lat, lon, alt) or None
 _last_sensor_gps: Optional[Tuple[float, float, float]] = None
 
@@ -54,6 +39,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="DJI Receiver: Publish DJI DroneID data via ZMQ.")
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Enable debug messages and logging output.")
+    parser.add_argument("--zmqsetting", default="127.0.0.1:4221", help="Define zmq server settings")
+    parser.add_argument("--antsdr", default="172.31.100.2:41030", help="Define AntSDR settings")
+    parser.add_argument("--wardgps", default="", help="Define WarDragon monitor settings")
+    parser.add_argument("--wardgpstimeout", default="", help="Define WarDragon monitor receive timeout")
+    parser.add_argument("--maxhorizspeed", default="200.0",
+                        help="Define MaxHorizSpeed settings, treat above as invalid")
+    parser.add_argument("--alert_id", default="drone-alert", help="Define alert id")
+
     return parser.parse_args()
 
 
@@ -89,7 +82,7 @@ def parse_frame(frame: bytes):
         return None, None
 
 
-def parse_data_1(data: bytes) -> dict:
+def parse_data_1(data: bytes, alert_id:str, max_horiz_speed:float) -> dict:
     """
     Parses data of package type 0x01, applying fallback logic for invalid fields.
     Returns a dictionary with the fields needed to build a ZMQ-compatible JSON structure.
@@ -136,7 +129,7 @@ def parse_data_1(data: bytes) -> dict:
         # 1) Serial: if blank/bogus, mark as alert (explicitly convey unknown)
         if len(serial_number.strip()) < 5:
             logging.debug("Serial number invalid/blank; marking as drone-alert.")
-            serial_number = ALERT_ID
+            serial_number = alert_id
 
         # 2) Drone lat/lon fallback if out of valid range -> keep as-is here;
         #    we'll decide later whether to use sensor GPS for placement.
@@ -156,7 +149,7 @@ def parse_data_1(data: bytes) -> dict:
             home_lon = 0.0
 
         # 5) Unrealistic speed fallback
-        if horizontal_speed > MAX_HORIZONTAL_SPEED:
+        if horizontal_speed > max_horiz_speed:
             logging.debug(f"Horizontal speed {horizontal_speed} m/s above max; resetting to 0.0.")
             horizontal_speed = 0.0
 
@@ -192,7 +185,7 @@ def is_valid_latlon(lat: float, lon: float) -> bool:
     return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and lat != 0.0 and lon != 0.0
 
 
-def setup_monitor_sub(endpoint: str) -> Optional[zmq.Socket]:
+def setup_monitor_sub(endpoint: str, timeout:int) -> Optional[zmq.Socket]:
     """
     Create a SUB socket to the WarDragon system monitor (publishes JSON with gps_data).
     Returns a connected SUB socket or None on failure.
@@ -201,7 +194,7 @@ def setup_monitor_sub(endpoint: str) -> Optional[zmq.Socket]:
         ctx = zmq.Context.instance()
         sub = ctx.socket(zmq.SUB)
         sub.setsockopt(zmq.SUBSCRIBE, b"")  # subscribe to all
-        sub.setsockopt(zmq.RCVTIMEO, MON_ZMQ_RECV_TIMEOUT_MS)
+        sub.setsockopt(zmq.RCVTIMEO, timeout)
         sub.connect(endpoint)
         return sub
     except Exception as e:
@@ -239,7 +232,7 @@ def poll_monitor_for_gps(sub_sock: Optional[zmq.Socket]) -> None:
         logging.debug(f"Monitor ZMQ recv failed: {e}")
 
 
-def format_as_zmq_json(parsed_data: dict,
+def format_as_zmq_json(parsed_data: dict, alert_id:str,
                        monitor_gps: Optional[Tuple[float, float, float]] = None) -> list:
     """
     Formats the parsed data into a ZMQ-compatible list of messages.
@@ -268,7 +261,7 @@ def format_as_zmq_json(parsed_data: dict,
     basic_id_value = parsed_data.get("serial_number", "unknown")
     if used_sensor:
         # Force a clear, consistent alert label when we used sensor position
-        basic_id_value = ALERT_ID
+        basic_id_value = alert_id
 
     basic_id_message = {
         "Basic ID": {
@@ -337,29 +330,36 @@ def send_zmq_message(zmq_pub_socket: zmq.Socket, message_list: list):
         logging.error(f"Failed to send JSON via ZMQ: {e}")
 
 
-def tcp_client():
+class MyObject:
+    def __init__(self, d=None):
+        if d is not None:
+            for key, value in d.items():
+                setattr(self, key, value)
+
+def tcp_client(options):
     """
     Connects to AntSDR via TCP, receives raw frames, parses them,
     and publishes the result as a ZMQ XPUB stream on the configured IP/Port.
     Also subscribes (non-blocking) to the WarDragon monitor ZMQ to cache sensor GPS.
     """
+    options = MyObject(options)
     context = zmq.Context()
     zmq_pub_socket = context.socket(zmq.XPUB)  # XPUB for efficient subscriptions
-    zmq_pub_socket.bind(f"tcp://{ZMQ_PUB_IP}:{ZMQ_PUB_PORT}")
-    logging.info(f"ZMQ XPUB socket bound to tcp://{ZMQ_PUB_IP}:{ZMQ_PUB_PORT}")
+    zmq_pub_socket.bind(f"tcp://{options.ZMQ_SETTING}")
+    logging.info(f"ZMQ XPUB socket bound to tcp://{options.ZMQ_SETTING}")
 
     # Connect to WarDragon monitor for GPS
-    mon_sub = setup_monitor_sub(MON_ZMQ_ENDPOINT)
+    mon_sub = setup_monitor_sub(options.MON_ZMQ_ENDPOINT, timeout=options.MON_ZMQ_RECV_TIMEOUT_MS)
     if mon_sub:
-        logging.info(f"Subscribed to WarDragon monitor at {MON_ZMQ_ENDPOINT}")
+        logging.info(f"Subscribed to WarDragon monitor at {options.MON_ZMQ_ENDPOINT}")
     else:
-        logging.warning(f"Could not subscribe to WarDragon monitor at {MON_ZMQ_ENDPOINT}. Proceeding without sensor GPS.")
+        logging.warning(f"Could not subscribe to WarDragon monitor at {options.MON_ZMQ_ENDPOINT}. Proceeding without sensor GPS.")
 
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-                client_socket.connect((ANTSDR_IP, ANTSDR_PORT))
-                logging.info(f"Connected to AntSDR at {ANTSDR_IP}:{ANTSDR_PORT}")
+                client_socket.connect((options.ANTSDR_IP, options.ANTSDR_PORT))
+                logging.info(f"Connected to AntSDR at {options.ANTSDR_IP}:{options.ANTSDR_PORT}")
 
                 while True:
                     # Opportunistically poll monitor for fresh GPS
@@ -372,10 +372,12 @@ def tcp_client():
 
                     package_type, data = parse_frame(frame)
                     if package_type == 0x01 and data:
-                        parsed_data = parse_data_1(data)
+                        parsed_data = parse_data_1(data, alert_id=options.ALERT_ID,
+                                                   max_horiz_speed=options.MAX_HORIZONTAL_SPEED)
                         zmq_message_list = format_as_zmq_json(
                             parsed_data,
-                            monitor_gps=_last_sensor_gps
+                            alert_id=options.ALERT_ID,
+                            monitor_gps=_last_sensor_gps,
                         )
                         if zmq_message_list:
                             send_zmq_message(zmq_pub_socket, zmq_message_list)
@@ -392,8 +394,33 @@ def tcp_client():
 
 def main():
     args = parse_args()
+    zmqsetting = args.zmqsetting
+
+    ANTSDR_IP, ANTSDR_PORT = args.antsdr.split(":")
+    ANTSDR_PORT = int(ANTSDR_PORT)
+
+    # WarDragon monitor ZMQ (provides sensor GPS via JSON).
+    # Override via env var WARD_MON_ZMQ if needed (e.g., "tcp://0.0.0.0:4225").
+    if args.wardgps=="":
+        MON_ZMQ_ENDPOINT = os.getenv("WARD_MON_ZMQ", "127.0.0.1:4225")
+    else:
+        MON_ZMQ_ENDPOINT = args.wardgps
+    if args.wardgpstimeout=="":
+        MON_ZMQ_RECV_TIMEOUT_MS = int(os.getenv("WARD_MON_RECV_TIMEOUT_MS", "50"))
+    else:
+        MON_ZMQ_RECV_TIMEOUT_MS = int(args.wardgpstimeout)
+
+
+    # Fallback/Validation constants
+    MAX_HORIZONTAL_SPEED = float(args.maxhorizspeed)
+    ALERT_ID = args.alert_id
+
     setup_logging(args.debug)
-    tcp_client()
+    options=dict(ZMQ_SETTING=zmqsetting,
+        ANTSDR_IP=ANTSDR_IP,ANTSDR_PORT=ANTSDR_PORT,MON_ZMQ_ENDPOINT=MON_ZMQ_ENDPOINT,
+        MON_ZMQ_RECV_TIMEOUT_MS=MON_ZMQ_RECV_TIMEOUT_MS, MAX_HORIZONTAL_SPEED=MAX_HORIZONTAL_SPEED,
+        ALERT_ID=ALERT_ID)
+    tcp_client(options)
 
 
 if __name__ == "__main__":
