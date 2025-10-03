@@ -145,6 +145,10 @@ def main():
     else:
         print("--pcap [file.pcapng] or --interface [wifi_monitor_interface] needed")
         exit(1)
+    if args.g:
+        channel = 149
+    else:
+        channel = 6
 
     if verbose:
         print(f"[auto] selected interface: {interface}")

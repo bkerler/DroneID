@@ -2,7 +2,7 @@
 
 ## Installation
 ```bash
-git clone https://github.com/alphafox02/DroneID.git
+git clone https://github.com/bkerler/DroneID.git
 cd DroneID
 git submodule init
 git submodule update
@@ -14,7 +14,7 @@ git submodule update
 ### 1. Bluetooth receiver (using Sonoff Dongle)
 1. Run 
 ```bash
-./bluetooth_receiver.sh -b 2000000 -s /dev/ttyUSB0 --zmqsetting 127.0.0.1:4222 -v
+./bluetooth_receiver.py -b 2000000 -s /dev/ttyUSB1 --zmqsetting 127.0.0.1:4222 -v
 ```
 ```
 Argument description:
