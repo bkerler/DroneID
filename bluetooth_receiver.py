@@ -5,12 +5,12 @@ import os
 import sys
 import argparse
 
+script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sniffle", "python_cli")
+sys.path.insert(0, script_path)
 
 try:
     from sniffle.python_cli.sniff_receiver import main
 except ImportError:
-    script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sniffle", "python_cli")
-    sys.path.insert(0, script_path)
     from sniff_receiver import main
 
 if __name__ == "__main__":
