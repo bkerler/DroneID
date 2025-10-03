@@ -213,7 +213,8 @@ def test_dict():
         ]
     ]
     txt = json.dumps(db)
-    open("drone.json", "w").write(txt)
+    with open("drone.json", "w") as wf:
+        wf.write(txt)
 
 
 def self_test_encoder():

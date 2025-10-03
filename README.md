@@ -11,7 +11,7 @@
 1. Get sniffle from [here](https://github.com/bkerler/sniffle) and install
 2. Run 
 ```bash
-./bluetooth_receiver.sh -b 2000000 -s /dev/ttyUSB1 --zmqsetting 127.0.0.1:4222 -v
+./bluetooth_receiver.py -b 2000000 -s /dev/ttyUSB1 --zmqsetting 127.0.0.1:4222 -v
 ```
 ```
 Argument description:

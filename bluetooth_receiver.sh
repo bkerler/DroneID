@@ -1,1 +1,0 @@
-python sniffle/python_cli/sniff_receiver.py -z -l -e $*

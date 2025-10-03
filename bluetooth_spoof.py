@@ -14,12 +14,10 @@ from sniffle.python_cli.sniffle.constants import BLE_ADV_AA
 from sniffle.python_cli.sniffle.sniffle_hw import SniffleHW, PhyMode
 
 # global variable to access hardware
-hw = None
+HW = None
 
 
 def main():
-    global msg
-    global msgsize
     print("\nOpenDroneID spoofer (c) B.Kerler 2024\n-------------------------------------\n")
     aparse = argparse.ArgumentParser(description="OpenID drone spoofer")
     aparse.add_argument("dronefile", default="drone.json", nargs="?")
@@ -41,37 +39,37 @@ def main():
 
     # timeout in ms
     timeout = 50
-    global hw
-    hw = SniffleHW(args.serport, baudrate=args.baudrate)
+    global HW
+    HW = SniffleHW(args.serport, baudrate=args.baudrate)
 
     # set the advertising channel (and return to ad-sniffing mode)
-    hw.cmd_chan_aa_phy(args.advchan, BLE_ADV_AA, PhyMode.PHY_CODED_S8)
+    HW.cmd_chan_aa_phy(args.advchan, BLE_ADV_AA, PhyMode.PHY_CODED_S8)
 
     # pause after sniffing
-    hw.cmd_pause_done(True)
+    HW.cmd_pause_done(True)
 
     # Accept/follow connections
-    hw.cmd_follow(False)
+    HW.cmd_follow(False)
 
     # turn off RSSI filter
-    hw.cmd_rssi()
+    HW.cmd_rssi()
 
     # Turn off MAC filter
-    hw.cmd_mac()
+    HW.cmd_mac()
 
     # initiator doesn't care about this setting, it always accepts aux
-    hw.cmd_auxadv(True)
+    HW.cmd_auxadv(True)
 
-    hw.random_addr()
+    HW.random_addr()
 
     # advertise roughly every 200 ms
-    hw.cmd_adv_interval(timeout)
+    HW.cmd_adv_interval(timeout)
 
     # reset preloaded encrypted connection interval changes
-    hw.cmd_interval_preload()
+    HW.cmd_interval_preload()
 
     # zero timestamps and flush old packets
-    hw.mark_and_flush()
+    HW.mark_and_flush()
 
     # advertising and scan response data
     uuid_type = int.to_bytes(0x16, 1, 'little')
@@ -79,7 +77,8 @@ def main():
     appcode = int.to_bytes(0x0D, 1, 'little')
     counter = 0
     packets = json_to_packets(dronefile)
-    # Packets are ordered by droneid and seqno, now we need to sort it by seqno to simulate movements
+    # Packets are ordered by droneid and seqno,
+    # now we need to sort it by seqno to simulate movements
     send_data = {}
     for droneid in packets:
         mac = None
@@ -97,31 +96,31 @@ def main():
                          OpenDroneID(protocol_version=ProtoVersions.F3411_19.value,
                                      msgs=msgs).parse())
             if len(data) < 245:
-                advData = int.to_bytes(len(data), 1, 'little') + data
+                adv_data = int.to_bytes(len(data), 1, 'little') + data
                 counter += 1
                 sys.stdout.flush()
                 if seqno not in send_data:
-                    send_data[seqno] = [(droneid,mac,adi,advData)]
+                    send_data[seqno] = [(droneid,mac,adi,adv_data)]
                 else:
-                    send_data[seqno].append((droneid,mac,adi,advData))
+                    send_data[seqno].append((droneid,mac,adi,adv_data))
 
     # Send the packets
     for seqno in send_data:
         for droneid, mac, adi, packet in send_data[seqno]:
             if mac is None:
-                hw.random_addr()
+                HW.random_addr()
             else:
-                hw.cmd_setaddr(mac, is_random=False)
+                HW.cmd_setaddr(mac, is_random=False)
             print(f"Sending packet {droneid} -> Seqno: {seqno}")
             # now enter advertiser mode, mode 0 = Non-Connectable Non-scannable
-            hw.cmd_advertise_ext(advData=packet, mode=0, adi=adi, phy1=PhyMode.PHY_1M,
+            HW.cmd_advertise_ext(advData=packet, mode=0, adi=adi, phy1=PhyMode.PHY_1M,
                                  phy2=PhyMode.PHY_CODED_S8)
             time.sleep((timeout / 1000) * 2)
-            hw.cmd_scan()
-            hw.cmd_advertise_ext(advData=packet, mode=0, adi=adi, phy1=PhyMode.PHY_CODED_S8,
+            HW.cmd_scan()
+            HW.cmd_advertise_ext(advData=packet, mode=0, adi=adi, phy1=PhyMode.PHY_CODED_S8,
                                  phy2=PhyMode.PHY_CODED_S8)
             time.sleep((timeout/1000)*2)
-            hw.cmd_scan()
+            HW.cmd_scan()
     print("Done.")
 
 if __name__ == "__main__":
